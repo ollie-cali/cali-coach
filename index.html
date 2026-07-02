@@ -1,0 +1,235 @@
+<!doctype html>
+<!--
+  CALI COACH — point your phone at an athlete, get live form scores.
+  Handstand: alignment score + hold timer + cue. Push-up: rep counting + per-rep rating.
+  Pose: MediaPipe Pose Landmarker (on-device, in-browser, no server, no video leaves the phone).
+  Scoring: ./scorer.js — cross-verified against the Python reference (10/10 test vectors).
+  AI coach: optional — paste an Anthropic API key in settings (stored ONLY in this
+  browser's localStorage) and Claude writes the post-set coaching summary.
+  Serve over https (GitHub Pages). iPhone Safari + Android Chrome supported.
+-->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Cali Coach</title>
+<style>
+  :root{--bg:#0d1014;--card:#161b22cc;--ink:#e9eef3;--sub:#9aa4ad;--gold:#e0a73a;--grn:#4cae6a;--red:#f0564b;--amber:#d29922}
+  *{box-sizing:border-box;font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden}
+  #stage{position:fixed;inset:0}
+  video{display:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .hud{position:absolute;left:0;right:0;display:flex;justify-content:center;pointer-events:none}
+  #topbar{top:calc(env(safe-area-inset-top,0px) + 10px);gap:8px}
+  .chip{background:var(--card);backdrop-filter:blur(8px);border:1px solid #2a313a;border-radius:999px;padding:8px 16px;font-weight:700;font-size:14px}
+  .chip.mode{color:var(--gold)}
+  #scorewrap{bottom:calc(env(safe-area-inset-bottom,0px) + 86px);flex-direction:column;align-items:center;gap:4px}
+  #score{font-size:88px;font-weight:800;line-height:1;color:var(--gold);text-shadow:0 2px 18px #000}
+  #cue{font-size:18px;font-weight:700;background:var(--card);border-radius:12px;padding:8px 16px;backdrop-filter:blur(8px)}
+  #sub{color:var(--sub);font-size:13px}
+  #bottombar{bottom:calc(env(safe-area-inset-bottom,0px) + 14px);gap:10px;pointer-events:auto}
+  button{background:var(--card);color:var(--ink);border:1px solid #2a313a;border-radius:12px;padding:12px 18px;font-size:15px;font-weight:700;backdrop-filter:blur(8px)}
+  button.gold{background:var(--gold);color:#1a1205;border:0}
+  #panel{position:fixed;inset:auto 0 0 0;max-height:72%;background:#11161d;border-radius:18px 18px 0 0;border-top:1px solid #2a313a;
+    padding:18px 18px calc(env(safe-area-inset-bottom,0px) + 18px);overflow:auto;transform:translateY(105%);transition:transform .25s}
+  #panel.open{transform:none}
+  #panel h2{margin:0 0 10px;font-size:18px} .item{border-bottom:1px solid #222a33;padding:10px 0;font-size:14px}
+  .item b{color:var(--gold)} textarea,input{width:100%;background:#0a0d11;color:var(--ink);border:1px solid #2a313a;border-radius:10px;padding:10px;font-size:14px}
+  #coachout{white-space:pre-wrap;background:#0a0d11;border-radius:10px;padding:12px;font-size:14px;line-height:1.45;margin-top:8px}
+  #splash{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9}
+  #splash h1{font-size:34px;margin:0}#splash h1 b{color:var(--gold)}
+  #splash p{color:var(--sub);max-width:300px;text-align:center;margin:0;font-size:14px}
+  .pulse{animation:p 1.4s infinite}@keyframes p{50%{opacity:.4}}
+</style></head><body>
+<div id="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div class="hud" id="topbar">
+    <span class="chip mode" id="mode">READY</span><span class="chip" id="timer" hidden>0.0s</span><span class="chip" id="reps" hidden>0 reps</span>
+  </div>
+  <div class="hud" id="scorewrap"><div id="score">--</div><div id="cue" hidden></div><div id="sub">side-on works best · whole body in frame</div></div>
+  <div class="hud" id="bottombar">
+    <button id="flip">Flip</button><button class="gold" id="sessionbtn">Session</button><button id="settings">⚙</button>
+  </div>
+</div>
+<div id="panel">
+  <h2 id="paneltitle">Session</h2>
+  <div id="panelbody"></div>
+  <div id="coachout" hidden></div>
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <button class="gold" id="coachbtn" hidden>Ask the Cali coach</button><button id="closepanel">Close</button>
+  </div>
+</div>
+<div id="splash"><h1>CALI <b>COACH</b></h1>
+  <p>Live handstand alignment + push-up form scoring. All on-device — no video leaves your phone.</p>
+  <button class="gold" id="start">Start camera</button><p id="loadmsg" class="pulse">loading pose engine…</p>
+</div>
+
+<script type="module">
+import { handstandScore, isInverted, pushupFrame, RepCounter, pickSide, chain, EMA } from "./scorer.js";
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const $ = id => document.getElementById(id);
+const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
+let landmarker, facing = "environment", session = [], mode = "READY";
+
+// ---- pose engine ----
+(async () => {
+  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate: "GPU" },
+    runningMode: "VIDEO", numPoses: 1 });
+  $("loadmsg").textContent = "pose engine ready";
+  $("loadmsg").classList.remove("pulse");
+})().catch(e => { $("loadmsg").textContent = "engine failed: " + e.message; });
+
+async function startCam() {
+  const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 } }, audio: false });
+  video.srcObject = s; await video.play();
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+}
+$("start").onclick = async () => {
+  try { await startCam(); $("splash").remove(); loop(); }
+  catch (e) { $("loadmsg").textContent = "camera blocked: " + e.message; }
+};
+$("flip").onclick = async () => { facing = facing === "environment" ? "user" : "environment";
+  video.srcObject?.getTracks().forEach(t => t.stop()); await startCam(); };
+
+// ---- state ----
+const scoreEMA = new EMA(0.25);
+let hs = { active: false, t0: 0, sum: 0, n: 0, min: 100, lastInv: 0, lastNot: 0 };
+let pu = { counter: new RepCounter(), shown: 0, lastActive: 0 };
+let lastCue = "", lastCueAt = 0;
+
+const SKEL = [[11,13],[13,15],[12,14],[14,16],[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+
+function draw(lm, col) {
+  ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.lineCap = "round";
+  for (const [a, b] of SKEL) {
+    if ((lm[a].visibility ?? 1) < 0.4 || (lm[b].visibility ?? 1) < 0.4) continue;
+    ctx.beginPath(); ctx.moveTo(lm[a].x*canvas.width, lm[a].y*canvas.height);
+    ctx.lineTo(lm[b].x*canvas.width, lm[b].y*canvas.height); ctx.stroke();
+  }
+  ctx.fillStyle = col;
+  for (const i of [11,12,13,14,15,16,23,24,25,26,27,28]) {
+    if ((lm[i].visibility ?? 1) < 0.4) continue;
+    ctx.beginPath(); ctx.arc(lm[i].x*canvas.width, lm[i].y*canvas.height, 6, 0, 7); ctx.fill();
+  }
+}
+function setMode(m) { if (m !== mode) { mode = m; $("mode").textContent = m; } }
+function setCue(c) { const now = performance.now();
+  if (c !== lastCue && now - lastCueAt > 1200) { lastCue = c; lastCueAt = now; $("cue").textContent = c; }
+  $("cue").hidden = !c; }
+function scoreCol(s) { return s >= 85 ? "#4cae6a" : s >= 65 ? "#e0a73a" : "#f0564b"; }
+
+function loop() {
+  requestAnimationFrame(loop);
+  if (!landmarker || video.readyState < 2) return;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const res = landmarker.detectForVideo(video, performance.now());
+  const lm = res.landmarks?.[0];
+  if (!lm) { setMode("READY"); $("score").textContent = "--"; setCue(""); return; }
+
+  const side = pickSide(lm);
+  const C = chain(lm, side);
+  const now = performance.now();
+  const visible = C.minVis > 0.4;
+  const inv = visible && isInverted(C.wri, C.sho, C.hip, C.ank);
+  const horiz = visible && !inv && Math.abs(C.sho[1]-C.ank[1]) < 0.28 && C.wri[1] > C.sho[1] - 0.05;
+
+  // ---------- HANDSTAND ----------
+  if (inv) { hs.lastInv = now;
+    if (!hs.active && now - (hs.lastNot || 0) >= 0 && (hs.t0 === 0 || now - hs.lastNot > 0)) {
+      if (!hs.pend) hs.pend = now;
+      if (now - hs.pend > 500 && !hs.active) { hs.active = true; hs.t0 = now; hs.sum = 0; hs.n = 0; hs.min = 100; scoreEMA.v = null; }
+    }
+  } else { hs.pend = 0; hs.lastNot = now; }
+
+  if (hs.active) {
+    setMode("HANDSTAND"); $("timer").hidden = false; $("reps").hidden = true;
+    $("timer").textContent = ((now - hs.t0)/1000).toFixed(1) + "s";
+    if (inv) {
+      const r = handstandScore(C.wri, C.sho, C.hip, C.kne, C.ank);
+      const s = scoreEMA.feed(r.score);
+      hs.sum += r.score; hs.n++; hs.min = Math.min(hs.min, r.score);
+      $("score").textContent = Math.round(s); $("score").style.color = scoreCol(s);
+      setCue(r.cue); draw(lm, scoreCol(s));
+    } else if (now - hs.lastInv > 700) {                     // debounced hold end
+      const secs = (hs.lastInv - hs.t0)/1000;
+      if (secs > 1.5) session.push({ type: "handstand", secs: +secs.toFixed(1),
+        avg: +(hs.sum/Math.max(1, hs.n)).toFixed(1), min: +hs.min.toFixed(1), at: new Date().toLocaleTimeString() });
+      hs.active = false; $("timer").hidden = true; setCue(""); $("score").textContent = "--";
+    } else draw(lm, "#e0a73a");
+    return;
+  }
+
+  // ---------- PUSH-UP ----------
+  if (horiz) {
+    setMode("PUSH-UP"); pu.lastActive = now;
+    $("reps").hidden = false; $("timer").hidden = true;
+    const f = pushupFrame(C.sho, C.elb, C.wri, C.hip, C.ank);
+    pu.counter.feed(f.elbow, f.lineDev);
+    const reps = pu.counter.reps;
+    if (reps.length > pu.shown) { pu.shown = reps.length;
+      const last = reps[reps.length-1];
+      $("score").textContent = Math.round(last.score); $("score").style.color = scoreCol(last.score);
+      setCue(last.cue);
+    }
+    $("reps").textContent = reps.length + " reps";
+    draw(lm, "#58a6ff");
+    return;
+  }
+
+  // ---------- idle / set end ----------
+  if (pu.counter.reps.length && now - pu.lastActive > 3000) {
+    const reps = pu.counter.reps;
+    session.push({ type: "pushups", reps: reps.length,
+      avg: +(reps.reduce((a, r) => a+r.score, 0)/reps.length).toFixed(1),
+      scores: reps.map(r => +r.score.toFixed(0)), at: new Date().toLocaleTimeString() });
+    pu.counter = new RepCounter(); pu.shown = 0; $("reps").hidden = true; $("score").textContent = "--"; setCue("");
+  }
+  setMode(visible ? "IN FRAME" : "READY");
+  if (visible) draw(lm, "#9aa4ad");
+}
+
+// ---------- session panel + AI coach ----------
+$("sessionbtn").onclick = () => { renderSession(); $("panel").classList.add("open"); };
+$("settings").onclick = () => { renderSettings(); $("panel").classList.add("open"); };
+$("closepanel").onclick = () => $("panel").classList.remove("open");
+
+function renderSession() {
+  $("paneltitle").textContent = "Session";
+  $("coachout").hidden = true;
+  $("coachbtn").hidden = session.length === 0;
+  $("panelbody").innerHTML = session.length === 0 ? '<div class="item">Nothing yet. Get someone upside down.</div>'
+    : session.map(e => e.type === "handstand"
+      ? `<div class="item"><b>Handstand</b> · ${e.secs}s · alignment avg <b>${e.avg}</b> (min ${e.min}) · ${e.at}</div>`
+      : `<div class="item"><b>Push-ups</b> · ${e.reps} reps · avg <b>${e.avg}</b> · [${e.scores.join(", ")}] · ${e.at}</div>`).join("");
+}
+function renderSettings() {
+  $("paneltitle").textContent = "Settings";
+  $("coachbtn").hidden = true; $("coachout").hidden = true;
+  $("panelbody").innerHTML = `<div class="item">Anthropic API key (optional — unlocks the AI coach; stored only in this browser):
+    <input id="apikey" type="password" placeholder="sk-ant-…" value="${localStorage.getItem("caliKey") || ""}">
+    <button class="gold" style="margin-top:8px" id="savekey">Save</button></div>
+    <div class="item" style="color:var(--sub)">Video never leaves the phone — only the numeric session summary is sent to Claude when you ask the coach.</div>`;
+  $("savekey").onclick = () => { localStorage.setItem("caliKey", $("apikey").value.trim()); $("panel").classList.remove("open"); };
+}
+$("coachbtn").onclick = async () => {
+  const key = localStorage.getItem("caliKey");
+  const out = $("coachout"); out.hidden = false;
+  if (!key) { out.textContent = "No API key set — add one in ⚙ settings to unlock the AI coach."; return; }
+  out.textContent = "coach is thinking…";
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01",
+                 "anthropic-dangerous-direct-browser-access": "true", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 350,
+        system: "You are the Cali calisthenics coach: direct, warm, expert. British English. Never use em dashes or en dashes. Given session data (handstand alignment scores out of 100 where deductions come from closed shoulders, banana back, bent knees and lean; push-up scores from depth, body line, lockout), give: 1) one-line verdict, 2) the single biggest fix with a concrete drill, 3) one thing they did well. Max 90 words.",
+        messages: [{ role: "user", content: "Session data: " + JSON.stringify(session) }] }) });
+    const j = await r.json();
+    out.textContent = j.content?.[0]?.text || ("API error: " + JSON.stringify(j.error || j).slice(0, 300));
+  } catch (e) { out.textContent = "network error: " + e.message; }
+};
+</script></body></html>
