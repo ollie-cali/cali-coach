@@ -1,6 +1,6 @@
 # Cali Coach → CaliDev integration package
 
-*[Maker Ollie delivery, 2026-07-03 overnight] Live demo: **https://ollie-cali.github.io/cali-coach/** (open on a phone, side-on at an athlete). This folder is the production port, ready to drop in. Mirrored at github.com/ollie-cali/cali-coach (branch `delivery`).*
+*[Maker Ollie delivery, 2026-07-03 overnight] Live demo: **https://raw.githack.com/ollie-cali/cali-coach/main/index.html** (open on a phone, side-on at an athlete). This folder is the production port, ready to drop in. Mirrored at github.com/ollie-cali/cali-coach (branch `delivery`).*
 
 ## What's verified vs what's yours to verify
 

@@ -1,5 +1,5 @@
 // TODAY-TIER: ship Cali Coach inside the app as a WebView (zero native work).
-// [Maker Ollie delivery] The demo is live at https://ollie-cali.github.io/cali-coach/
+// [Maker Ollie delivery] The demo is live at https://raw.githack.com/ollie-cali/cali-coach/main/index.html
 // Requires: npx expo install react-native-webview
 // iOS: add NSCameraUsageDescription to app.json infoPlist.
 // Android: camera permission + webview grants below.
@@ -9,7 +9,7 @@ import { WebView } from "react-native-webview";
 export default function CoachWebViewScreen() {
   return (
     <WebView
-      source={{ uri: "https://ollie-cali.github.io/cali-coach/" }}
+      source={{ uri: "https://raw.githack.com/ollie-cali/cali-coach/main/index.html" }}
       style={{ flex: 1, backgroundColor: "#0d1014" }}
       allowsInlineMediaPlayback
       mediaPlaybackRequiresUserAction={false}
