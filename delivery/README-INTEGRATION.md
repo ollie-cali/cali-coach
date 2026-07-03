@@ -27,3 +27,6 @@ Pose estimation is a commodity; **the moat is the calisthenics-specific scoring 
 - Weight calibration: ~20 coach-judged clips vs engine scores → refit the four handstand weights + push-up mix.
 - MediaPipe `lite` → `full` model if inverted-pose tracking wobbles (one URL in the web app; plugin setting natively).
 - Next scorers (same pattern, ~30 lines each): L-sit, plank, pull-up (vertical chain).
+
+## Strava integration (added 2026-07-03 — the FORM-goggles play)
+`supabase/functions_strava-connect_index.ts`: OAuth connect + token refresh + auto-post each session as a WeightTraining activity ("✓ Cali Verified" summary in the description). Needs: `strava_connections` table (SQL in the fn header, service-role only), Strava API app secrets (**Ollie: create at strava.com/settings/api**), then wire "Connect Strava" in the app + call `?action=post` on session end. The web demo already ships the manual flow (copy summary → strava.com/upload/manual) + Hevy-style session cards + IG captions.
