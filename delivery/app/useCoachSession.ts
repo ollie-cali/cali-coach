@@ -11,7 +11,7 @@
 //   FRONT LEVER hanging + horizontal body  -> hold + line/horizontality score
 //   L-SIT / PIKE / BRIDGE  seated & arch postures -> mobility holds + scores
 // Priority: inverted > front-lever > hanging > bridge > horizontal > pike > L-sit > standing.
-import { handstandScore, isInverted, isHanging, pushupFrame, plankScore, torsoLean,
+import { handstandScore, isInverted, isHanging, pushupFrame, plankScore, torsoLean, POSE,
          frontLeverScore, lsitScore, pikeScore, bridgeScore,
          isFrontLeverPose, isBridgePose, isPikePose, isLsitPose,
          RepCounter, SquatCounter, PullupCounter, angleAt, pickSide, chain, EMA,
@@ -31,7 +31,7 @@ export type SessionEntry =
 
 const VIS_GATE = 0.4, HORIZ_BAND = 0.28;
 const HOLD_START_MS = 500, HOLD_END_MS = 700, SET_END_MS = 3000, MIN_HOLD_S = 1.5;
-const PLANK_ARM_MS = 2500, PLANK_STILL_ELBOW = 150;
+const PLANK_ARM_MS = 2500, PLANK_ELBOW_RANGE = 30;   // corpus: forearm planks are STATIC ~90deg — cycling, not angle, marks a push-up
 
 const round1 = (x: number) => Math.round(x * 10) / 10;
 
@@ -46,9 +46,11 @@ export class CoachEngine {
   lock(kind: MovementKind | null): void { this.locked = kind; }
   private scoreEMA = new EMA(0.25);
   private hs = { active: false, t0: 0, sum: 0, n: 0, min: 100, lastInv: 0, pend: 0 };
-  private pu = { counter: new RepCounter(), lastActive: 0, lastCue: null as string | null, lastScore: null as number | null };
-  private pk = { active: false, t0: 0, devSum: 0, n: 0, horizSince: 0, moved: false, lastHoriz: 0 };
-  private sq = { counter: new SquatCounter(), lastRepAt: 0 };
+  private pu = { counter: new RepCounter(), lastActive: 0, lastCue: null as string | null, lastScore: null as number | null, lastRepAt: 0, lastCount: 0 };
+  private pk = { active: false, t0: 0, devSum: 0, n: 0, horizSince: 0, moved: false, lastHoriz: 0,
+                 ring: [] as [number, number][] };   // rolling (t, smoothed elbow) window
+  private elbowEMA = new EMA(0.35);   // pose noise on occluded forearm-plank elbows fakes reps — smooth before counting [corpus]
+  private sq = { counter: new SquatCounter(), lastRepAt: 0, lastHipX: null as number | null, lastHipT: 0 };
   private pl = { counter: new PullupCounter(), lastHang: 0 };
   private holds = {
     front_lever: new HoldTracker("front_lever"),
@@ -65,9 +67,20 @@ export class CoachEngine {
     return { mode, score: null, cue: null, holdSecs: null, reps: null };  // arming
   }
 
+  private side: "L" | "R" | null = null;
+  private pickSticky(lm: Landmark[]): "L" | "R" {
+    const L = [11,13,15,23,25,27], R = [12,14,16,24,26,28];
+    const vis = (idx: number[]) => idx.reduce((a, i) => a + (lm[i].visibility ?? 0), 0);
+    const l = vis(L), r = vis(R);
+    if (this.side === null) this.side = l >= r ? "L" : "R";
+    else if (this.side === "L" && r > l * 1.15) this.side = "R";   // 15% hysteresis
+    else if (this.side === "R" && l > r * 1.15) this.side = "L";
+    return this.side;
+  }
+
   feed(lm: Landmark[] | null, now: number): CoachFrameOut {
     if (!lm) return this.tickIdle(now, "READY");
-    const C = chain(lm, pickSide(lm));
+    const C = chain(lm, this.pickSticky(lm));
     const visible = C.minVis > VIS_GATE;
     if (!visible) return this.tickIdle(now, "READY");
 
@@ -162,22 +175,35 @@ export class CoachEngine {
 
     // ---------- HORIZONTAL: push-up vs plank ----------
     if (horiz) {
-      if (!this.pk.horizSince) { this.pk.horizSince = now; this.pk.moved = false; }
+      if (!this.pk.horizSince) { this.pk.horizSince = now; this.pk.ring = []; this.elbowEMA.v = null; }
       this.pk.lastHoriz = now;
       this.pu.lastActive = now;
       const f = pushupFrame(C.sho, C.elb, C.wri, C.hip, C.ank);
-      if (this.locked !== "plank") this.pu.counter.feed(f.elbow, f.lineDev);  // declared plank: reps don't hijack
-      if (f.elbow < PLANK_STILL_ELBOW && this.locked !== "plank") this.pk.moved = true;
+      const elbowS = this.elbowEMA.feed(f.elbow);
+      if (this.locked !== "plank") this.pu.counter.feed(elbowS, f.lineDev);  // declared plank: reps don't hijack
+      // stillness over the LAST PLANK_ARM_MS only — a take that changes variant (or a
+      // messy setup) can still settle into a plank; a latched flag never recovers. [corpus]
+      this.pk.ring.push([now, elbowS]);
+      while (this.pk.ring.length && now - this.pk.ring[0][0] > PLANK_ARM_MS) this.pk.ring.shift();
+      const es = this.pk.ring.map(r => r[1]);
+      const windowStill = this.pk.ring.length > 4 && now - this.pk.ring[0][0] > PLANK_ARM_MS * 0.8
+        && (Math.max(...es) - Math.min(...es)) < PLANK_ELBOW_RANGE;
+      this.pk.moved = !windowStill && this.locked !== "plank";   // declared plank always counts
 
       const reps = this.pu.counter.reps;
-      if (reps.length) {                                        // it's a push-up set
+      if (reps.length > this.pu.lastCount) { this.pu.lastRepAt = now; this.pu.lastCount = reps.length; }
+      // push-ups then a HOLD: when reps stopped a while ago and the arms are still,
+      // close the set and let the plank take over (real training flow). [corpus + product]
+      if (reps.length && windowStill && now - this.pu.lastRepAt >= SET_END_MS) {
+        this.closePushups();
+      } else if (reps.length) {                                 // an active push-up set
         if (this.pk.active) this.pk.active = false;             // cancel any provisional plank
         const last = reps[reps.length - 1];
         this.pu.lastScore = last.score; this.pu.lastCue = last.cue;
         return { mode: "PUSH-UP", score: last.score, cue: last.cue, holdSecs: null, reps: reps.length };
       }
-      // no reps yet: plank arms if we've been horizontal + still long enough
-      if (!this.pk.moved && now - this.pk.horizSince > PLANK_ARM_MS) {
+      // no reps yet: plank arms once the rolling window is still
+      if (!this.pk.moved) {
         if (!this.pk.active) { this.pk.active = true; this.pk.t0 = this.pk.horizSince; this.pk.devSum = 0; this.pk.n = 0; }
         this.pk.devSum += Math.abs(f.lineDev); this.pk.n++;
         const s = plankScore(this.pk.devSum / this.pk.n);
@@ -192,6 +218,16 @@ export class CoachEngine {
 
     // ---------- SQUAT (standing) ----------
     if (standing) {
+      // walking gate: hips translating across the frame = walking (knee cycling included),
+      // not squatting. Feed the counter only when roughly stationary. [corpus strays]
+      const hipX = C.hip[0];
+      const dt = this.sq.lastHipT ? (now - this.sq.lastHipT) : 0;
+      const speed = this.sq.lastHipX !== null && dt > 0 ? Math.abs(hipX - this.sq.lastHipX) / (dt / 1000) : 0;
+      this.sq.lastHipX = hipX; this.sq.lastHipT = now;
+      if (speed > 0.12) {                                        // >12% frame-width/s = locomotion
+        if (this.sq.counter.state !== "TOP") this.sq.counter.state = "TOP";  // discard any in-flight "rep" — it was a stride
+        return this.tickIdle(now, "IN FRAME");
+      }
       const knee = angleAt(C.hip, C.kne, C.ank);
       const before = this.sq.counter.reps.length;
       this.sq.counter.feed(knee, torsoLean(C.sho, C.hip));
@@ -216,7 +252,7 @@ export class CoachEngine {
     this.log({ type: "pushups", reps: reps.length, avg: round1(reps.reduce((a, r) => a + r.score, 0) / reps.length),
       scores: reps.map(r => Math.round(r.score)), at: new Date().toISOString() });
     this.pu.counter = new RepCounter(); this.pu.lastScore = null; this.pu.lastCue = null;
-    this.pk.horizSince = 0;
+    this.pu.lastCount = 0; this.pu.lastRepAt = 0;
   }
   private closePlank() {
     const secs = (this.pk.lastHoriz - this.pk.t0) / 1000;

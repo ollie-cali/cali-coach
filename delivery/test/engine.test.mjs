@@ -253,5 +253,67 @@ holdScenario("bridge", BRIDGE, "bridge", 85, 100);
     && e.session[0].type === "handstand" && e.session[0].secs > 3, JSON.stringify(e.session));
 }
 
+
+// ---- corpus round 3: forearm plank (static ~90 deg elbows) must read as PLANK in auto ----
+{
+  const e = new CoachEngine(); let t = 0, out;
+  for (let i = 0; i < 182; i++) out = e.feed(pushup(92 + (i % 3)), t += 33);  // 6 s forearm plank + noise
+  check("forearm plank detects (auto)", out.mode === "PLANK", `${out.mode}`);
+  for (let i = 0; i < 60; i++) out = e.feed(STAND, t += 33);
+  check("forearm plank logs plank", e.session.length === 1 && e.session[0].type === "plank",
+        JSON.stringify(e.session.map(s => s.type)));
+}
+// ---- walking across frame (knees cycling + hips translating) must NOT log squats ----
+{
+  const e = new CoachEngine(); let t = 0;
+  for (let i = 0; i < 150; i++) {
+    const lm = squatF(140 + 35 * Math.sin(i / 4));            // knee cycling like steps
+    const dx = (i / 150) * 0.9 - 0.45;                        // realistic walking pace (~0.18 frame-widths/s)
+    const shifted = lm.map(p => ({ x: p.x + dx, y: p.y, visibility: p.visibility }));
+    e.feed(shifted, t += 33);
+  }
+  for (let i = 0; i < 150; i++) e.feed(STAND, t += 33);
+  check("walking logs no squats", e.session.length === 0, JSON.stringify(e.session.map(s => s.type)));
+}
+
+
+// ---- corpus round 3b: side-flapping (near forearm vs far straight arm) must not fake reps ----
+{
+  const e = new CoachEngine(); let t = 0, out;
+  for (let i = 0; i < 240; i++) {
+    // both sides present in a horizontal plank; visibility alternates slightly per frame
+    const lm = pushup(92).map(p => ({ ...p }));
+    // mirror the left chain onto the right with a STRAIGHT arm (the far arm illusion)
+    const straight = pushup(172);
+    for (const [l, r] of [[11,12],[13,14],[15,16],[23,24],[25,26],[27,28]]) {
+      lm[r] = { ...straight[l] };
+      lm[l].visibility = i % 2 ? 0.90 : 0.88;
+      lm[r].visibility = i % 2 ? 0.88 : 0.90;
+    }
+    out = e.feed(lm, t += 33);
+  }
+  check("side-flap footage reads plank (auto)", out.mode === "PLANK", `${out.mode} reps=${out.reps}`);
+  for (let i = 0; i < 90; i++) e.feed(STAND, t += 33);
+  const types = [...new Set(e.session.map(s => s.type))];
+  check("side-flap logs plank only", types.length === 1 && types[0] === "plank", JSON.stringify(types));
+}
+
+
+// ---- real training flow: push-ups THEN a plank hold (continuous horizontal) ----
+{
+  const e = new CoachEngine(); let t = 0, out;
+  const sweep = [];
+  for (let k = 0; k < 3; k++) {
+    for (let a = 170; a > 85; a -= 5) sweep.push(a);
+    for (let a = 85; a <= 170; a += 5) sweep.push(a);
+  }
+  for (const a of sweep) out = e.feed(pushup(a), t += 33);       // 3 reps
+  for (let i = 0; i < 300; i++) out = e.feed(pushup(171), t += 33); // then hold ~10 s
+  check("plank takes over after the set", out.mode === "PLANK", `${out.mode} ${out.holdSecs?.toFixed?.(1)}s`);
+  for (let i = 0; i < 90; i++) e.feed(STAND, t += 33);
+  const types = e.session.map(s => s.type);
+  check("both logged: pushups + plank", types.includes("pushups") && types.includes("plank"), JSON.stringify(e.session));
+}
+
 console.log(`\nTOTAL: ${pass}/${pass + fail} engine checks pass`);
 process.exit(fail ? 1 : 0);
