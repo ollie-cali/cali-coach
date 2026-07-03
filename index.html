@@ -47,9 +47,9 @@
   <div class="hud" id="topbar">
     <span class="chip mode" id="mode">READY</span><span class="chip" id="timer" hidden>0.0s</span><span class="chip" id="reps" hidden>0 reps</span>
   </div>
-  <div class="hud" id="scorewrap"><div id="score">--</div><div id="cue" hidden></div><div id="sub">auto-detects: handstand · push-up · squat · plank · pull-up — side-on, whole body in frame</div></div>
+  <div class="hud" id="scorewrap"><div id="score">--</div><div id="cue" hidden></div><div id="sub">auto-detects 9 moves: handstand · push-ups · squats · plank · pull-ups · front lever · L-sit · pike · bridge</div></div>
   <div class="hud" id="bottombar">
-    <button id="flip">Flip</button><button class="gold" id="sessionbtn">Session</button><button id="settings">⚙</button>
+    <button id="flip">Flip</button><button id="voice">🔊</button><button class="gold" id="sessionbtn">Session</button><button id="settings">⚙</button>
   </div>
 </div>
 <div id="panel">
@@ -61,7 +61,7 @@
   </div>
 </div>
 <div id="splash"><h1>CALI <b>COACH</b></h1>
-  <p>Live form scoring: handstand, push-ups, squats, plank, pull-ups. All on-device — no video leaves your phone.</p>
+  <p>Live form scoring across 9 movements, strength to mobility. All on-device — no video leaves your phone.</p>
   <button class="gold" id="start">Start camera</button><p id="loadmsg" class="pulse">loading pose engine…</p>
 </div>
 
@@ -74,6 +74,7 @@ const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
 let landmarker, facing = "environment", mirrored = false;
 const engine = new CoachEngine();
 const session = engine.session;
+let announced = 0;
 
 // ---- pose engine ----
 (async () => {
@@ -117,7 +118,34 @@ function draw(lm, col) {
     ctx.beginPath(); ctx.arc(lm[i].x*canvas.width, lm[i].y*canvas.height, 6, 0, 7); ctx.fill();
   }
 }
-const MODE_COL = { HANDSTAND: null, "PUSH-UP": "#58a6ff", PLANK: "#a371f7", SQUAT: "#d29922", "PULL-UP": "#3fb950", "IN FRAME": "#9aa4ad", READY: "#9aa4ad" };
+// ghost line: the perfect handstand line, drawn through the wrists
+function ghostLine(lm) {
+  const side = (lm[15].visibility ?? 0) >= (lm[16].visibility ?? 0) ? 15 : 16;
+  const x = lm[side].x * canvas.width;
+  ctx.save();
+  ctx.setLineDash([14, 10]); ctx.lineWidth = 3; ctx.strokeStyle = "#e0a73a88";
+  ctx.beginPath(); ctx.moveTo(x, lm[side].y * canvas.height); ctx.lineTo(x, 0); ctx.stroke();
+  ctx.restore();
+}
+
+// voice coach (on-device speech synthesis)
+let voiceOn = JSON.parse(localStorage.getItem("caliVoice") ?? "true");
+let lastSpoken = "", lastSpokenAt = 0;
+function say(text, force = false) {
+  if (!voiceOn || !("speechSynthesis" in window)) return;
+  const now = performance.now();
+  if (!force && (text === lastSpoken || now - lastSpokenAt < 3500)) return;
+  lastSpoken = text; lastSpokenAt = now;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replace(/—/g, ","));
+  u.rate = 1.02; u.lang = "en-GB";
+  speechSynthesis.speak(u);
+}
+$("voice").textContent = voiceOn ? "🔊" : "🔇";
+$("voice").onclick = () => { voiceOn = !voiceOn; localStorage.setItem("caliVoice", JSON.stringify(voiceOn));
+  $("voice").textContent = voiceOn ? "🔊" : "🔇"; if (voiceOn) say("voice coach on", true); else speechSynthesis.cancel(); };
+
+const MODE_COL = { HANDSTAND: null, "PUSH-UP": "#58a6ff", PLANK: "#a371f7", SQUAT: "#d29922", "PULL-UP": "#3fb950", "FRONT LEVER": "#f0564b", "L-SIT": "#e0a73a", "PIKE": "#4cae6a", "BRIDGE": "#db61a2", "IN FRAME": "#9aa4ad", READY: "#9aa4ad" };
 function scoreCol(s) { return s >= 85 ? "#4cae6a" : s >= 65 ? "#e0a73a" : "#f0564b"; }
 let lastCue = "", lastCueAt = 0;
 function setCue(c) { const now = performance.now();
@@ -142,8 +170,16 @@ function loop() {
   if (out.score != null) { $("score").textContent = Math.round(out.score); $("score").style.color = scoreCol(out.score); }
   else $("score").textContent = "--";
   setCue(out.cue);
+  if (out.cue) say(out.cue);
   if (lm) draw(lm, out.mode === "HANDSTAND" ? scoreCol(out.score ?? 50) : (MODE_COL[out.mode] || "#9aa4ad"));
+  if (lm && out.mode === "HANDSTAND") ghostLine(lm);
   ctx.restore();
+  // announce logged results as they land
+  if (session.length > announced) {
+    const e = session[session.length - 1]; announced = session.length;
+    if ("secs" in e) say(`${e.secs} seconds, score ${Math.round(e.avg)}`, true);
+    else say(`${e.reps} reps, average ${Math.round(e.avg)}`, true);
+  }
 }
 
 // ---------- session panel + AI coach ----------
@@ -154,7 +190,8 @@ $("closepanel").onclick = () => $("panel").classList.remove("open");
 const fmt = e => {
   const at = e.at.includes("T") ? e.at.slice(11, 19) : e.at;
   if (e.type === "handstand") return `<div class="item"><b>Handstand</b> · ${e.secs}s · alignment avg <b>${e.avg}</b> (min ${e.min}) · ${at}</div>`;
-  if (e.type === "plank") return `<div class="item"><b>Plank</b> · ${e.secs}s · line <b>${e.avg}</b> · ${at}</div>`;
+  const holdNames = { plank: "Plank", front_lever: "Front lever", lsit: "L-sit", pike: "Pike fold", bridge: "Bridge" };
+  if (holdNames[e.type]) return `<div class="item"><b>${holdNames[e.type]}</b> · ${e.secs}s · score <b>${e.avg}</b> · ${at}</div>`;
   const name = { pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups" }[e.type];
   return `<div class="item"><b>${name}</b> · ${e.reps} reps · avg <b>${e.avg}</b> · [${e.scores.join(", ")}] · ${at}</div>`;
 };
@@ -186,7 +223,7 @@ $("coachbtn").onclick = async () => {
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01",
                  "anthropic-dangerous-direct-browser-access": "true", "content-type": "application/json" },
       body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 350,
-        system: "You are the Cali calisthenics coach: direct, warm, expert. British English. Never use em dashes or en dashes. Given session data (handstand alignment and plank line scores out of 100; push-up scores from depth, body line, lockout; squat scores from depth, torso, lockout; pull-up scores from range of motion), give: 1) one-line verdict, 2) the single biggest fix with a concrete drill, 3) one thing they did well. Max 90 words.",
+        system: "You are the Cali calisthenics coach: direct, warm, expert. British English. Never use em dashes or en dashes. Given session data (handstand alignment and plank line scores out of 100; push-up scores from depth, body line, lockout; squat scores from depth, torso, lockout; pull-up scores from range of motion; front lever from hip line and horizontality; L-sit from leg height; pike fold and bridge from joint angles, all out of 100), give: 1) one-line verdict, 2) the single biggest fix with a concrete drill, 3) one thing they did well. Max 90 words.",
         messages: [{ role: "user", content: "Session data: " + JSON.stringify(session) }] }) });
     const j = await r.json();
     out.textContent = j.content?.[0]?.text || ("API error: " + JSON.stringify(j.error || j).slice(0, 300));

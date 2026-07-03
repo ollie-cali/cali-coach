@@ -49,4 +49,17 @@ for (const c of V.pullup_reps) {
   console.log(`${ok ? "PASS" : "FAIL"}  pullup/${c.name}: ${pc.reps.length} reps, js ${pc.reps.map(r => r.score.toFixed(1))}`);
 }
 console.log(`extended: ${pass2}/${pass2 + fail2} groups match`);
-process.exit(fail || fail2 ? 1 : 0);
+// ---- skill + mobility holds ----
+import { frontLeverScore, lsitScore, pikeScore, bridgeScore } from "./scorer.js";
+let pass3 = 0, fail3 = 0;
+const chk = (name, r, exp) => {
+  const ok = close(r.score, exp.score, 1e-3) && r.cue === exp.cue;
+  ok ? pass3++ : fail3++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}: js ${r.score.toFixed(2)} vs py ${exp.score} · "${r.cue}"`);
+};
+for (const c of V.front_lever) chk(`frontlever/${c.name}`, frontLeverScore(c.sho, c.hip, c.kne, c.ank), c.expect);
+for (const c of V.lsit) chk(`lsit/${c.name}`, lsitScore(c.hip, c.kne, c.ank), c.expect);
+for (const c of V.pike) chk(`pike/${c.name}`, pikeScore(c.sho, c.hip, c.kne, c.ank), c.expect);
+for (const c of V.bridge) chk(`bridge/${c.name}`, bridgeScore(c.wri, c.sho, c.hip, c.kne), c.expect);
+console.log(`holds: ${pass3}/${pass3 + fail3} groups match`);
+process.exit(fail || fail2 || fail3 ? 1 : 0);

@@ -140,5 +140,63 @@ function pullF(elbowDeg) {
         JSON.stringify(e.session));
 }
 
+
+// ================== skill + mobility holds ==================
+// front lever: hanging, body horizontal (wrists above shoulders)
+function leverF(hipA = 180) {
+  const sho = [0.35, 0.55], wri = [0.33, 0.40], elb = [0.34, 0.47];
+  const hip = [sho[0] + 0.18, sho[1]];
+  const t2 = (180 - hipA) * Math.PI / 180;
+  const kne = [hip[0] + 0.15*Math.cos(t2), hip[1] + 0.15*Math.sin(t2)];
+  const ank = [kne[0] + 0.15*Math.cos(t2), kne[1] + 0.15*Math.sin(t2)];
+  return frame({ sho, elb, wri, hip, kne, ank });
+}
+// L-sit: torso vertical, support hands by hips, legs straight out horizontal
+const LSIT = frame({ sho: [0.5, 0.38], elb: [0.51, 0.5], wri: [0.52, 0.62],
+                     hip: [0.5, 0.6], kne: [0.65, 0.6], ank: [0.8, 0.6] });
+// pike: seated fold ~40 deg
+function pikeF() {
+  const hip = [0.5, 0.75], ank = [0.8, 0.75];
+  const a = -40 * Math.PI / 180;
+  const sho = [hip[0] + 0.22*Math.cos(a), hip[1] + 0.22*Math.sin(a)];
+  return frame({ sho, elb: [sho[0]+0.1, sho[1]+0.05], wri: [sho[0]+0.18, sho[1]+0.1],
+                 hip, kne: [0.65, 0.75], ank });
+}
+// bridge: hips the high point, hands + feet down
+const BRIDGE = frame({ wri: [0.35, 0.85], sho: [0.35, 0.73], hip: [0.35, 0.53],
+                       elb: [0.35, 0.79], kne: [0.37, 0.36], ank: [0.55, 0.88] });
+
+function holdScenario(name, mkFrame, expectType, minScore, maxScore) {
+  const e = new CoachEngine(); let t = 0, out;
+  for (let i = 0; i < 150; i++) out = e.feed(mkFrame, t += 33);      // ~5 s in posture
+  const modeOk = out.mode !== "READY" && out.mode !== "IN FRAME";
+  for (let i = 0; i < 60; i++) out = e.feed(STAND, t += 33);         // leave 2 s
+  const s = e.session;
+  const ok = modeOk && s.length === 1 && s[0].type === expectType
+    && s[0].secs > 3 && s[0].avg >= minScore && s[0].avg <= maxScore;
+  check(`${name} hold`, ok, JSON.stringify(s) + (modeOk ? "" : " (mode never engaged)"));
+}
+holdScenario("front lever (textbook)", leverF(180), "front_lever", 95, 100);
+holdScenario("front lever (piked 155)", leverF(155), "front_lever", 40, 75);
+holdScenario("L-sit", LSIT, "lsit", 75, 100);
+holdScenario("pike fold", pikeF(), "pike", 60, 100);
+holdScenario("bridge", BRIDGE, "bridge", 85, 100);
+
+// disambiguation: bridge must NOT read as plank/push-up; L-sit must NOT log squats
+{
+  const e = new CoachEngine(); let t = 0;
+  for (let i = 0; i < 150; i++) e.feed(BRIDGE, t += 33);
+  for (let i = 0; i < 60; i++) e.feed(STAND, t += 33);
+  check("bridge is not a plank", e.session.length === 1 && e.session[0].type === "bridge",
+        JSON.stringify(e.session.map(s => s.type)));
+}
+{
+  const e = new CoachEngine(); let t = 0;
+  for (let i = 0; i < 150; i++) e.feed(LSIT, t += 33);
+  for (let i = 0; i < 60; i++) e.feed(STAND, t += 33);
+  check("L-sit logs no squats", e.session.every(s => s.type === "lsit"),
+        JSON.stringify(e.session.map(s => s.type)));
+}
+
 console.log(`\nTOTAL: ${pass}/${pass + fail} engine checks pass`);
 process.exit(fail ? 1 : 0);
