@@ -130,3 +130,88 @@ export class EMA {
   constructor(a: number) { this.a = a; }
   feed(x: number): number { this.v = this.v === null ? x : this.a*x + (1-this.a)*this.v; return this.v; }
 }
+
+// ---------------- SQUAT ----------------
+export const SQ_TOP = 160, SQ_BOT = 100;
+
+export function squatDepthScore(minKnee: number): number {
+  if (minKnee <= 90) return 100;
+  if (minKnee >= 130) return 0;
+  return (130 - minKnee) / 40 * 100;
+}
+export function squatTorsoScore(meanTorsoLean: number): number {
+  return Math.max(0, 100 - 2.5 * Math.max(0, meanTorsoLean - 20));
+}
+export interface SquatRep { score: number; depth: number; torso: number; cue: string }
+
+export function rateSquat(minKnee: number, meanTorsoLean: number, topKnee: number): SquatRep {
+  const d = squatDepthScore(minKnee), t = squatTorsoScore(meanTorsoLean);
+  const lock = topKnee >= 155 ? 100 : 50;
+  const score = 0.55*d + 0.35*t + 0.10*lock;
+  let cue: string;
+  if (d < 60) cue = "sit deeper — hip crease to the knee";
+  else if (t < 60) cue = "chest up — you're folding forward";
+  else if (lock < 100) cue = "stand all the way up";
+  else cue = "clean squat";
+  return { score, depth: d, torso: t, cue };
+}
+
+export class SquatCounter {
+  state: "TOP" | "DOWN" | "UP" = "TOP";
+  minKnee = 180; leans: number[] = []; reps: SquatRep[] = [];
+  feed(knee: number, torsoLean: number): void {
+    if (this.state === "TOP") {
+      if (knee < SQ_TOP) { this.state = "DOWN"; this.minKnee = knee; this.leans = [torsoLean]; }
+    } else if (this.state === "DOWN") {
+      this.minKnee = Math.min(this.minKnee, knee); this.leans.push(torsoLean);
+      if (knee > this.minKnee + 15) this.state = "UP";
+    } else {
+      this.leans.push(torsoLean);
+      if (knee >= SQ_TOP) {
+        const mean = this.leans.reduce((a, b) => a+b, 0) / this.leans.length;
+        this.reps.push(rateSquat(this.minKnee, mean, knee));
+        this.state = "TOP";
+      }
+    }
+  }
+}
+
+// ---------------- PLANK ----------------
+export function plankScore(meanLineDev: number): number {
+  return Math.max(0, Math.min(100, 100 - 4*meanLineDev));
+}
+
+// ---------------- PULL-UP ----------------
+export const PL_TOP = 160, PL_BOT = 90;
+
+export function pullupRomScore(minElbow: number): number {
+  if (minElbow <= 60) return 100;
+  if (minElbow >= 110) return 0;
+  return (110 - minElbow) / 50 * 100;
+}
+export interface PullupRep { score: number; rom: number; cue: string }
+export function ratePullup(minElbow: number): PullupRep {
+  const r = pullupRomScore(minElbow);
+  return { score: r, rom: r, cue: r < 60 ? "pull higher — chin over the bar" : "clean pull-up" };
+}
+export class PullupCounter {
+  state: "HANG" | "PULL" | "LOWER" = "HANG";
+  minElbow = 180; reps: PullupRep[] = [];
+  feed(elbow: number): void {
+    if (this.state === "HANG") {
+      if (elbow < PL_TOP) { this.state = "PULL"; this.minElbow = elbow; }
+    } else if (this.state === "PULL") {
+      this.minElbow = Math.min(this.minElbow, elbow);
+      if (elbow > this.minElbow + 15) this.state = "LOWER";
+    } else if (elbow >= PL_TOP) {
+      this.reps.push(ratePullup(this.minElbow));
+      this.state = "HANG";
+    }
+  }
+}
+
+// posture helpers for the new modes
+export function isHanging(wri: Pt, sho: Pt, hip: Pt): boolean {
+  return wri[1] < sho[1] && sho[1] < hip[1];       // wrists above shoulders above hips
+}
+export function torsoLean(sho: Pt, hip: Pt): number { return leanFromVertical(hip, sho); }

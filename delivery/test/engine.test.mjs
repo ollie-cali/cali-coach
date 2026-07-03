@@ -65,5 +65,80 @@ const check = (name, cond, detail) => { (cond ? pass++ : fail++); console.log(`$
         JSON.stringify(e.session));
 }
 
-console.log(`\n${pass}/${pass + fail} engine checks pass`);
+// ================== extended movements ==================
+// rotate helper: place point at angle th (deg) at joint J relative to ref point R
+function place(J, R, thDeg, len) {
+  const ux = R[0]-J[0], uy = R[1]-J[1], n = Math.hypot(ux, uy);
+  const th = thDeg * Math.PI / 180;
+  return [J[0] + (ux/n*Math.cos(th) - uy/n*Math.sin(th)) * len,
+          J[1] + (ux/n*Math.sin(th) + uy/n*Math.cos(th)) * len];
+}
+// squat frame: standing chain, knee angle controlled by moving the ankle about the knee
+function squatF(kneeDeg) {
+  const hip = [0.5, 0.55], kne = [0.5, 0.725];
+  const ank = place(kne, hip, kneeDeg, 0.175);
+  return frame({ sho: [0.5, 0.35], elb: [0.52, 0.55], wri: [0.53, 0.72], hip, kne, ank });
+}
+// pull-up frame: hanging chain, elbow angle controlled by moving the wrist about the elbow
+function pullF(elbowDeg) {
+  const sho = [0.5, 0.42], elb = [0.47, 0.31];
+  const wri = place(elb, sho, elbowDeg, 0.12);
+  return frame({ sho, elb, wri, hip: [0.5, 0.62], kne: [0.5, 0.78], ank: [0.5, 0.92] });
+}
+
+// ---- scenario 4: 3 squats then idle -> one set of 3 ----
+{
+  const e = new CoachEngine(); let t = 0, out;
+  const sweep = [];
+  for (let k = 0; k < 3; k++) {
+    for (let a = 175; a > 88; a -= 5) sweep.push(a);
+    for (let a = 88; a <= 175; a += 5) sweep.push(a);
+  }
+  for (const a of sweep) out = e.feed(squatF(a), t += 33);
+  check("squat mode + 3 reps live", out.mode === "SQUAT" && out.reps === 3, `${out.mode} reps ${out.reps} score ${out.score?.toFixed(0)}`);
+  for (let i = 0; i < 160; i++) out = e.feed(squatF(178), t += 33);   // stand still 5s
+  check("squat set logged", e.session.length === 1 && e.session[0].type === "squats" && e.session[0].reps === 3,
+        JSON.stringify(e.session));
+}
+
+// ---- scenario 5: 6 s straight-arm plank -> one plank hold, NO push-up set ----
+{
+  const e = new CoachEngine(); let t = 0, out;
+  for (let i = 0; i < 182; i++) out = e.feed(pushup(172), t += 33);   // 6 s horizontal, arms straight
+  check("plank mode engages", out.mode === "PLANK" && out.holdSecs > 2, `${out.mode} ${out.holdSecs?.toFixed(1)}s score ${out.score?.toFixed(0)}`);
+  for (let i = 0; i < 60; i++) out = e.feed(STAND, t += 33);          // stand up 2 s
+  check("plank logged, not pushups", e.session.length === 1 && e.session[0].type === "plank" && e.session[0].secs > 4,
+        JSON.stringify(e.session));
+}
+
+// ---- scenario 6: push-ups do NOT log a plank (disambiguation) ----
+{
+  const e = new CoachEngine(); let t = 0;
+  const sweep = [];
+  for (let k = 0; k < 3; k++) {
+    for (let a = 170; a > 85; a -= 5) sweep.push(a);
+    for (let a = 85; a <= 170; a += 5) sweep.push(a);
+  }
+  for (const a of sweep) e.feed(pushup(a), t += 33);
+  for (let i = 0; i < 120; i++) e.feed(STAND, t += 33);
+  const types = e.session.map(s => s.type);
+  check("pushups only, no phantom plank", e.session.length === 1 && types[0] === "pushups", JSON.stringify(types));
+}
+
+// ---- scenario 7: 3 pull-ups hanging -> one set ----
+{
+  const e = new CoachEngine(); let t = 0, out;
+  const sweep = [];
+  for (let k = 0; k < 3; k++) {
+    for (let a = 175; a > 58; a -= 6) sweep.push(a);
+    for (let a = 58; a <= 175; a += 6) sweep.push(a);
+  }
+  for (const a of sweep) out = e.feed(pullF(a), t += 33);
+  check("pull-up mode + 3 reps", out.mode === "PULL-UP" && out.reps === 3, `${out.mode} reps ${out.reps} score ${out.score?.toFixed(0)}`);
+  for (let i = 0; i < 120; i++) out = e.feed(STAND, t += 33);
+  check("pull-up set logged", e.session.length === 1 && e.session[0].type === "pullups" && e.session[0].reps === 3,
+        JSON.stringify(e.session));
+}
+
+console.log(`\nTOTAL: ${pass}/${pass + fail} engine checks pass`);
 process.exit(fail ? 1 : 0);
