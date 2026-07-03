@@ -1,7 +1,8 @@
 // CALI COACH — the app shell (v5). The tested brain lives in engine.js/scorer.js;
 // this file is camera, canvas, feedback, recording, sharing, history, duel, PWA.
 import { CoachEngine } from "./engine.js";
-import { handstandScore, chain, pickSide } from "./scorer.js";
+import { handstandScore, chain, pickSide, angleAt, torsoLean, isInverted, isHanging,
+         isFrontLeverPose, isBridgePose, isPikePose, isLsitPose } from "./scorer.js";
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 const $ = id => document.getElementById(id);
@@ -226,7 +227,8 @@ function checkPB(e) {
 // ================= history (localStorage journal) =================
 const journal = JSON.parse(localStorage.getItem("caliJournal") || "[]");
 function journalAdd(e) {
-  journal.push({ type: e.type, secs: e.secs, reps: e.reps, avg: e.avg, pb: !!e.pb, player: e.player, at: e.at });
+  journal.push({ type: e.type, secs: e.secs, reps: e.reps, avg: e.avg, pb: !!e.pb, player: e.player, at: e.at,
+    trace: e.trace ? downsample(e.trace, 40) : undefined });
   if (journal.length > 2000) journal.splice(0, journal.length - 2000);
   localStorage.setItem("caliJournal", JSON.stringify(journal));
 }
@@ -323,6 +325,100 @@ function levelLandmarks(lm) {
   });
 }
 
+// ================= movement picker + workout runner =================
+const KINDS = { handstand: "Handstand", pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups",
+  plank: "Plank", front_lever: "Front lever", lsit: "L-sit", pike: "Pike fold", bridge: "Bridge" };
+let locked = null;
+function setLock(kind) {
+  locked = kind; engine.lock(kind);
+  $("pick").textContent = kind ? "🎯 " + KINDS[kind] : "🎯 AUTO";
+  if (kind) say(`${KINDS[kind]} selected — get into position`, true);
+  else say("auto-detect on", true);
+}
+const CIRCUIT = [
+  { kind: "pushups", reps: 10 }, { kind: "plank", secs: 20 },
+  { kind: "squats", reps: 10 }, { kind: "handstand", secs: 10 },
+];
+const workout = { steps: null, i: 0, resting: 0, done: false, startLen: 0 };
+function workoutStart(steps) {
+  workout.steps = steps; workout.i = 0; workout.resting = 0; workout.done = false;
+  workoutStep();
+  $("panel").classList.remove("open");
+}
+function workoutStep() {
+  const s = workout.steps[workout.i];
+  setLock(s.kind);
+  workout.startLen = session.length;
+  const what = s.reps ? `${s.reps} ${KINDS[s.kind].toLowerCase()}` : `${s.secs} second ${KINDS[s.kind].toLowerCase()}`;
+  toast = { text: `${workout.i + 1}/${workout.steps.length} — ${what.toUpperCase()}`, until: performance.now() + 2500 };
+  say(`Next: ${what}. Go when ready.`, true);
+}
+function workoutTick(out, now) {
+  if (!workout.steps || workout.done) return null;
+  if (workout.resting) {
+    const left = Math.ceil((workout.resting - now) / 1000);
+    if (left <= 0) { workout.resting = 0; workoutStep(); return null; }
+    return `rest — ${left}s`;
+  }
+  const s = workout.steps[workout.i];
+  let hit = false;
+  if (s.reps && out.reps != null && out.reps >= s.reps) hit = true;
+  if (s.secs && out.holdSecs != null && out.holdSecs >= s.secs) hit = true;
+  if (hit) {
+    sfx.milestone(); say("done — nice", true);
+    workout.i++;
+    if (workout.i >= workout.steps.length) {
+      workout.done = true; workout.steps = null; setLock(null);
+      celebrate("WORKOUT COMPLETE");
+    } else { workout.resting = now + 20000; say("rest 20 seconds", true); }
+  }
+  const target = s.reps ? `${Math.min(out.reps ?? 0, s.reps)}/${s.reps}` : (out.holdSecs != null ? `${out.holdSecs.toFixed(0)}/${s.secs}s` : `target ${s.secs}s`);
+  return `${workout.i + 1 <= workout.steps?.length ? (workout.i + 1) + "/" + workout.steps.length + " · " : ""}${KINDS[s.kind]} ${target}`;
+}
+
+// ================= debug overlay =================
+let debugOn = JSON.parse(localStorage.getItem("caliDebug") ?? "false");
+function paintDebug(lm, out) {
+  if (!debugOn || !lm) return;
+  const C = chain(lm, pickSide(lm));
+  const flags = {
+    inv: isInverted(C.wri, C.sho, C.hip, C.ank), hang: isHanging(C.wri, C.sho, C.hip),
+    lever: isFrontLeverPose(C), bridge: isBridgePose(C), pike: isPikePose(C), lsit: isLsitPose(C),
+    horiz: Math.abs(C.sho[1] - C.ank[1]) < 0.28 && C.wri[1] > C.sho[1] - 0.05,
+  };
+  const lines = [
+    `mode ${out.mode}${locked ? " · LOCK " + locked : ""}`,
+    `vis ${C.minVis.toFixed(2)}`,
+    `elbow ${angleAt(C.sho, C.elb, C.wri).toFixed(0)}°  knee ${angleAt(C.hip, C.kne, C.ank).toFixed(0)}°`,
+    `hipline ${angleAt(C.sho, C.hip, C.ank).toFixed(0)}°  lean ${torsoLean(C.sho, C.hip).toFixed(0)}°`,
+    Object.entries(flags).filter(([, v]) => v).map(([k]) => k).join(" ") || "no posture",
+  ];
+  const s = Math.min(canvas.width, canvas.height) / 720;
+  ctx.save(); ctx.textBaseline = "top"; ctx.font = `${15 * s}px ui-monospace,monospace`;
+  const w = Math.max(...lines.map(l => ctx.measureText(l).width));
+  ctx.fillStyle = "#0d1014cc"; ctx.fillRect(canvas.width - w - 28 * s, 70 * s, w + 20 * s, lines.length * 20 * s + 12 * s);
+  ctx.fillStyle = "#4cae6a";
+  lines.forEach((l, i) => ctx.fillText(l, canvas.width - w - 18 * s, 78 * s + i * 20 * s));
+  ctx.restore();
+}
+
+// ================= training-data traces (numeric only, no video) =================
+let curTrace = [], lastTraceAt = 0;
+function traceTick(lm, out, now) {
+  if (!ACTIVE.has(out.mode) || !lm || now - lastTraceAt < 100) return;
+  lastTraceAt = now;
+  const C = chain(lm, pickSide(lm));
+  curTrace.push([Math.round(now) % 1000000, Math.round(angleAt(C.sho, C.elb, C.wri)),
+    Math.round(angleAt(C.hip, C.kne, C.ank)), Math.round(angleAt(C.sho, C.hip, C.ank)),
+    Math.round(torsoLean(C.sho, C.hip) * 10) / 10]);
+  if (curTrace.length > 1200) curTrace.shift();
+}
+function downsample(arr, n) {
+  if (arr.length <= n) return arr;
+  const step = arr.length / n;
+  return Array.from({ length: n }, (_, i) => arr[Math.floor(i * step)]);
+}
+
 // ================= skeleton + ghost =================
 const SKEL = [[11,13],[13,15],[12,14],[14,16],[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
 function draw(lm, col) {
@@ -359,7 +455,12 @@ function loop() {
   const now = performance.now();
 
   const out = engine.feed(lm, now);
-  const guide = framingTick(lm, out, now);
+  let guide = framingTick(lm, out, now);
+  const wGuide = workoutTick(out, now);
+  if (wGuide) guide = wGuide;
+  else if (!guide && locked && !ACTIVE.has(out.mode) && wasReady)
+    guide = "get into position — " + KINDS[locked];
+  traceTick(lm, out, now);
   announceTick(out, now);
   setCue(out.cue);
   if (out.cue) say(out.cue);
@@ -367,6 +468,7 @@ function loop() {
   if (lm && out.mode === "HANDSTAND") ghostLine(lm);
   shotTick(lm, out, now);
   paintHUD(out, guide);
+  paintDebug(lm, out);
   paintParty(now);
   ctx.restore();
   recTick(out);
@@ -375,6 +477,7 @@ function loop() {
     const e = session[session.length - 1]; announced = session.length;
     const prevReps = e.reps;
     if (bestShot) { e.shot = bestShot.url; e.angles = bestShot.angles; bestShot = null; }
+    if (curTrace.length) { e.trace = downsample(curTrace, 120); curTrace = []; }
     checkPB(e);
     duelTick(e);
     journalAdd(e);
@@ -390,6 +493,21 @@ function loop() {
 const NAMES = { handstand: "Handstand", plank: "Plank", front_lever: "Front lever", lsit: "L-sit",
   pike: "Pike fold", bridge: "Bridge", pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups" };
 
+$("pick").onclick = () => { renderPicker(); $("panel").classList.add("open"); };
+function renderPicker() {
+  $("paneltitle").textContent = "Movement";
+  $("coachbtn").hidden = true; $("coachout").hidden = true;
+  const b = (label, on, fn) => `<button class="${on ? "gold" : "sec"}" style="width:auto;padding:10px 16px;font-size:14px" data-k="${fn}">${label}</button>`;
+  $("panelbody").innerHTML =
+    `<div class="item"><b>Guided workout</b><div style="margin-top:8px">` +
+    `<button class="gold" id="startcircuit">▶ Starter circuit (push-ups · plank · squats · handstand)</button></div></div>` +
+    `<div class="item"><b>Or lock one movement</b> — the coach judges only what you declare:<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px" id="kindrow">` +
+    b("AUTO", !locked, "") + Object.entries(KINDS).map(([k, n]) => b(n, locked === k, k)).join("") +
+    `</div></div>`;
+  $("startcircuit").onclick = () => workoutStart(CIRCUIT.slice());
+  $("kindrow").querySelectorAll("button").forEach(btn =>
+    btn.onclick = () => { setLock(btn.dataset.k || null); workout.steps = null; renderPicker(); });
+}
 $("sessionbtn").onclick = () => { renderSession(); $("panel").classList.add("open"); };
 $("historybtn").onclick = () => { renderHistory(); $("panel").classList.add("open"); };
 $("settings").onclick = () => { renderSettings(); $("panel").classList.add("open"); };
@@ -448,6 +566,8 @@ function renderSettings() {
       <button class="${duel.on ? "gold" : "sec"}" style="margin-top:8px" id="dueltoggle">${duel.on ? "Duel ON — tap to end" : "Start duel"}</button></div>
     <div class="item">📐 Auto-level (beta) — corrects a tilted camera on phones. Live tilt: <b id="tiltval">${deviceRoll.toFixed(1)}°</b>
       <button class="${tiltOn ? "gold" : "sec"}" style="margin-top:8px" id="tilttoggle">${tiltOn ? "Auto-level ON" : "Auto-level OFF"}</button></div>
+    <div class="item">🐞 Debug overlay — live posture flags + measured angles
+      <button class="${debugOn ? "gold" : "sec"}" style="margin-top:8px" id="debugtoggle">${debugOn ? "Debug ON" : "Debug OFF"}</button></div>
     <div class="item">Anthropic API key (optional — unlocks the AI coach; stored only in this browser):
       <input id="apikey" type="password" placeholder="sk-ant-…" value="${localStorage.getItem("caliKey") || ""}">
       <button class="gold" style="margin-top:8px" id="savekey">Save</button></div>
@@ -457,6 +577,7 @@ function renderSettings() {
     if (duel.on) { duel.turn = "A"; duel.scores = { A: [], B: [] }; say("Duel on. Player A, you're up", true); }
     renderSettings(); };
   $("tilttoggle").onclick = () => { tiltOn = !tiltOn; localStorage.setItem("caliTilt", JSON.stringify(tiltOn)); renderSettings(); };
+  $("debugtoggle").onclick = () => { debugOn = !debugOn; localStorage.setItem("caliDebug", JSON.stringify(debugOn)); renderSettings(); };
   const iv = setInterval(() => { const el = $("tiltval"); if (!el) return clearInterval(iv); el.textContent = deviceRoll.toFixed(1) + "°"; }, 300);
 }
 
@@ -526,7 +647,7 @@ $("coachbtn").onclick = async () => {
                  "anthropic-dangerous-direct-browser-access": "true", "content-type": "application/json" },
       body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 350,
         system: "You are the Cali calisthenics coach: direct, warm, expert. British English. Never use em dashes or en dashes. Given session data (handstand alignment and plank line scores out of 100; push-up scores from depth, body line, lockout; squat scores from depth, torso, lockout; pull-up scores from range of motion; front lever from hip line and horizontality; L-sit from leg height; pike fold and bridge from joint angles, all out of 100), give: 1) one-line verdict, 2) the single biggest fix with a concrete drill, 3) one thing they did well. Max 90 words.",
-        messages: [{ role: "user", content: "Session data: " + JSON.stringify(session.map(({ clip, shot, ...rest }) => rest)) }] }) });
+        messages: [{ role: "user", content: "Session data: " + JSON.stringify(session.map(({ clip, shot, trace, ...rest }) => rest)) }] }) });
     const j = await r.json();
     out.textContent = j.content?.[0]?.text || ("API error: " + JSON.stringify(j.error || j).slice(0, 300));
   } catch (e) { out.textContent = "network error: " + e.message; }

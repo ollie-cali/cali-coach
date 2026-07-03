@@ -29,6 +29,12 @@ class CoachEngine {
   session = [];
   onLog;
   // wire to the supabase insert
+  locked = null;
+  // declared-movement mode (coach/workout flow)
+  /** Lock detection to one movement (null = auto-detect all nine). */
+  lock(kind) {
+    this.locked = kind;
+  }
   scoreEMA = new EMA(0.25);
   hs = { active: false, t0: 0, sum: 0, n: 0, min: 100, lastInv: 0, pend: 0 };
   pu = { counter: new RepCounter(), lastActive: 0, lastCue: null, lastScore: null };
@@ -56,11 +62,25 @@ class CoachEngine {
     const lever = !inv && isFrontLeverPose(C);
     const hang = !inv && !lever && isHanging(C.wri, C.sho, C.hip);
     const bridge = !inv && !lever && !hang && isBridgePose(C);
-    const pikeP = !inv && !lever && !hang && !bridge && isPikePose(C);
-    const lsitP = !inv && !lever && !hang && !bridge && !pikeP && isLsitPose(C);
-    const horiz = !inv && !lever && !hang && !bridge && !pikeP && !lsitP && Math.abs(C.sho[1] - C.ank[1]) < HORIZ_BAND && C.wri[1] > C.sho[1] - 0.05;
-    const standing = !inv && !lever && !hang && !bridge && !horiz && !pikeP && !lsitP;
-    if (inv) {
+    let pikeP = !inv && !lever && !hang && !bridge && isPikePose(C);
+    let lsitP = !inv && !lever && !hang && !bridge && !pikeP && isLsitPose(C);
+    let horiz = !inv && !lever && !hang && !bridge && !pikeP && !lsitP && Math.abs(C.sho[1] - C.ank[1]) < HORIZ_BAND && C.wri[1] > C.sho[1] - 0.05;
+    let standing = !inv && !lever && !hang && !bridge && !horiz && !pikeP && !lsitP;
+    let invA = inv, leverA = lever, hangA = hang, bridgeA = bridge;
+    if (this.locked) {
+      const want = this.locked;
+      invA = want === "handstand" ? inv : false;
+      leverA = want === "front_lever" ? lever : false;
+      hangA = want === "pullups" ? hang : false;
+      bridgeA = want === "bridge" ? bridge : false;
+      pikeP = want === "pike" ? pikeP : false;
+      lsitP = want === "lsit" ? lsitP : false;
+      horiz = want === "pushups" || want === "plank" ? !inv && !hang && Math.abs(C.sho[1] - C.ank[1]) < HORIZ_BAND && C.wri[1] > C.sho[1] - 0.05 : false;
+      standing = want === "squats" ? !inv && !hang : false;
+      if (want === "plank") this.pk.moved = false;
+      if (want === "pushups") this.pk.horizSince = 0;
+    }
+    if (invA) {
       this.hs.lastInv = now;
       if (!this.hs.active) {
         if (!this.hs.pend) this.hs.pend = now;
@@ -75,7 +95,7 @@ class CoachEngine {
       }
     } else this.hs.pend = 0;
     if (this.hs.active) {
-      if (inv) {
+      if (invA) {
         const r = handstandScore(C.wri, C.sho, C.hip, C.kne, C.ank);
         const s = this.scoreEMA.feed(r.score);
         this.hs.sum += r.score;
@@ -97,15 +117,15 @@ class CoachEngine {
       }
       return { mode: "HANDSTAND", score: this.scoreEMA.v, cue: null, holdSecs: (now - this.hs.t0) / 1e3, reps: null };
     }
-    if (lever) return this.hold("front_lever", "FRONT LEVER", now, frontLeverScore(C.sho, C.hip, C.kne, C.ank));
+    if (leverA) return this.hold("front_lever", "FRONT LEVER", now, frontLeverScore(C.sho, C.hip, C.kne, C.ank));
     this.holds.front_lever.tick(now, (e) => this.log(e));
-    if (bridge) return this.hold("bridge", "BRIDGE", now, bridgeScore(C.wri, C.sho, C.hip, C.kne));
+    if (bridgeA) return this.hold("bridge", "BRIDGE", now, bridgeScore(C.wri, C.sho, C.hip, C.kne));
     this.holds.bridge.tick(now, (e) => this.log(e));
     if (pikeP) return this.hold("pike", "PIKE", now, pikeScore(C.sho, C.hip, C.kne, C.ank));
     this.holds.pike.tick(now, (e) => this.log(e));
     if (lsitP) return this.hold("lsit", "L-SIT", now, lsitScore(C.hip, C.kne, C.ank));
     this.holds.lsit.tick(now, (e) => this.log(e));
-    if (hang) {
+    if (hangA) {
       this.pl.lastHang = now;
       const elbow = angleAt(C.sho, C.elb, C.wri);
       this.pl.counter.feed(elbow);
@@ -128,8 +148,8 @@ class CoachEngine {
       this.pk.lastHoriz = now;
       this.pu.lastActive = now;
       const f = pushupFrame(C.sho, C.elb, C.wri, C.hip, C.ank);
-      this.pu.counter.feed(f.elbow, f.lineDev);
-      if (f.elbow < PLANK_STILL_ELBOW) this.pk.moved = true;
+      if (this.locked !== "plank") this.pu.counter.feed(f.elbow, f.lineDev);
+      if (f.elbow < PLANK_STILL_ELBOW && this.locked !== "plank") this.pk.moved = true;
       const reps = this.pu.counter.reps;
       if (reps.length) {
         if (this.pk.active) this.pk.active = false;
