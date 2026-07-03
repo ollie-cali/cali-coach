@@ -198,5 +198,50 @@ holdScenario("bridge", BRIDGE, "bridge", 85, 100);
         JSON.stringify(e.session.map(s => s.type)));
 }
 
+
+// ================== declared-movement lock ==================
+{ // locked to push-ups: 6 s still horizontal must NOT become a plank
+  const e = new CoachEngine(); e.lock("pushups"); let t = 0;
+  for (let i = 0; i < 182; i++) e.feed(pushup(172), t += 33);
+  for (let i = 0; i < 120; i++) e.feed(STAND, t += 33);
+  check("locked pushups: no phantom plank", e.session.length === 0, JSON.stringify(e.session.map(s => s.type)));
+}
+{ // locked to plank: push-up motion still counts as plank time (user declared it)
+  const e = new CoachEngine(); e.lock("plank"); let t = 0;
+  const sweep = [];
+  for (let k = 0; k < 3; k++) {
+    for (let a = 170; a > 85; a -= 5) sweep.push(a);
+    for (let a = 85; a <= 170; a += 5) sweep.push(a);
+  }
+  for (const a of sweep) e.feed(pushup(a), t += 33);
+  for (let i = 0; i < 60; i++) e.feed(STAND, t += 33);
+  const types = e.session.map(s => s.type);
+  check("locked plank: logs plank only", types.length >= 1 && types.every(x => x === "plank"), JSON.stringify(types));
+}
+{ // locked to handstand: squats do nothing
+  const e = new CoachEngine(); e.lock("handstand"); let t = 0;
+  const sweep = [];
+  for (let k = 0; k < 3; k++) {
+    for (let a = 175; a > 88; a -= 5) sweep.push(a);
+    for (let a = 88; a <= 175; a += 5) sweep.push(a);
+  }
+  for (const a of sweep) e.feed(squatF(a), t += 33);
+  for (let i = 0; i < 160; i++) e.feed(squatF(178), t += 33);
+  check("locked handstand: squats ignored", e.session.length === 0, JSON.stringify(e.session));
+}
+{ // locked handstand still scores handstands + unlock restores auto
+  const e = new CoachEngine(); e.lock("handstand"); let t = 0;
+  for (let i = 0; i < 106; i++) e.feed(HS, t += 33);
+  for (let i = 0; i < 40; i++) e.feed(STAND, t += 33);
+  e.lock(null);
+  const sweep = [];
+  for (let a = 175; a > 88; a -= 5) sweep.push(a);
+  for (let a = 88; a <= 175; a += 5) sweep.push(a);
+  for (const a of sweep) e.feed(squatF(a), t += 33);
+  for (let i = 0; i < 160; i++) e.feed(squatF(178), t += 33);
+  const types = e.session.map(s => s.type);
+  check("lock scores + unlock restores auto", types.join(",") === "handstand,squats", JSON.stringify(types));
+}
+
 console.log(`\nTOTAL: ${pass}/${pass + fail} engine checks pass`);
 process.exit(fail ? 1 : 0);
