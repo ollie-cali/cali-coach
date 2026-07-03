@@ -1,0 +1,536 @@
+// CALI COACH — the app shell (v5). The tested brain lives in engine.js/scorer.js;
+// this file is camera, canvas, feedback, recording, sharing, history, duel, PWA.
+import { CoachEngine } from "./engine.js";
+import { handstandScore, chain, pickSide } from "./scorer.js";
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const $ = id => document.getElementById(id);
+const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
+let landmarker, facing = "environment", mirrored = false;
+const engine = new CoachEngine();
+const session = engine.session;
+let announced = 0;
+
+// ================= pose engine =================
+(async () => {
+  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate: "GPU" },
+    runningMode: "VIDEO", numPoses: 1 });
+  $("loadmsg").textContent = "pose engine ready";
+  $("loadmsg").classList.remove("pulse");
+})().catch(e => { $("loadmsg").textContent = "engine failed: " + e.message; });
+
+async function startCam() {
+  const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 } }, audio: false });
+  video.srcObject = s; await video.play();
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  const settings = s.getVideoTracks()[0].getSettings();
+  mirrored = (settings.facingMode ?? facing) !== "environment";
+}
+$("start").onclick = async () => {
+  try {
+    await startCam(); $("splash").remove(); initAudio(); requestTilt(); loop();
+    say("Cali Coach ready. Get your whole body in frame, side on.", true);
+  } catch (e) { $("loadmsg").textContent = "camera blocked: " + e.message; }
+};
+$("flip").onclick = async () => {
+  const prev = facing;
+  facing = facing === "environment" ? "user" : "environment";
+  try { video.srcObject?.getTracks().forEach(t => t.stop()); await startCam(); }
+  catch { facing = prev; try { await startCam(); } catch {} }
+};
+
+// ================= voice + sound =================
+let voiceOn = JSON.parse(localStorage.getItem("caliVoice") ?? "true");
+let lastSpoken = "", lastSpokenAt = 0;
+function say(text, force = false) {
+  if (!voiceOn || !("speechSynthesis" in window)) return;
+  const now = performance.now();
+  if (!force && (text === lastSpoken || now - lastSpokenAt < 3500)) return;
+  lastSpoken = text; lastSpokenAt = now;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replace(/—/g, ","));
+  u.rate = 1.02; u.lang = "en-GB";
+  speechSynthesis.speak(u);
+}
+$("voice").textContent = voiceOn ? "🔊" : "🔇";
+$("voice").onclick = () => { voiceOn = !voiceOn; localStorage.setItem("caliVoice", JSON.stringify(voiceOn));
+  $("voice").textContent = voiceOn ? "🔊" : "🔇"; if (voiceOn) say("voice coach on", true); else speechSynthesis.cancel(); };
+
+let audio = null;
+function initAudio() { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch {} }
+function beep(freq = 880, dur = 0.09, gain = 0.06, when = 0) {
+  if (!audio || !voiceOn) return;
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.frequency.value = freq; o.type = "sine";
+  g.gain.setValueAtTime(gain, audio.currentTime + when);
+  g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + when + dur);
+  o.connect(g); g.connect(audio.destination);
+  o.start(audio.currentTime + when); o.stop(audio.currentTime + when + dur + 0.02);
+}
+const sfx = {
+  rep: () => beep(740, 0.07),
+  milestone: () => { beep(880, 0.09); beep(1175, 0.12, 0.06, 0.11); },
+  ready: () => beep(587, 0.12, 0.05),
+  pb: () => { beep(659, 0.1); beep(880, 0.1, 0.06, 0.12); beep(1319, 0.22, 0.07, 0.24); },
+};
+
+// ================= framing coach (setup guidance) =================
+const FRAME_SET = [0, 11, 12, 15, 16, 23, 24, 27, 28];
+let readySince = 0, wasReady = false, lastGuide = "", lastGuideAt = 0;
+function framingGuide(lm) {
+  if (!lm) return "step into frame";
+  const vis = i => lm[i].visibility ?? 0;
+  const headOk = vis(0) > 0.4, feetOk = vis(27) > 0.35 || vis(28) > 0.35;
+  if (!headOk && !feetOk) return "step into frame";
+  if (!feetOk) return "feet out of frame — step back or tilt the camera down";
+  if (!headOk) return "head out of frame — step back";
+  const pts = FRAME_SET.filter(i => vis(i) > 0.35).map(i => lm[i]);
+  if (pts.length < 5) return "step into frame";
+  const ys = pts.map(p => p.y), xs = pts.map(p => p.x);
+  const h = Math.max(...ys) - Math.min(...ys);
+  if (h < 0.42) return "come closer";
+  if (Math.min(...ys) < 0.015 && Math.max(...ys) > 0.985) return "step back";
+  const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+  if (cx < 0.22 || cx > 0.78) return "move toward the centre of the frame";
+  // side-on check only when upright (standing)
+  const torso = Math.abs((lm[11].y + lm[12].y) / 2 - (lm[23].y + lm[24].y) / 2);
+  const shoDx = Math.abs(lm[11].x - lm[12].x);
+  if (torso > 0.12 && shoDx > 0.55 * torso) return "turn side-on to the camera";
+  return null;
+}
+function framingTick(lm, out, now) {
+  if (out.mode !== "READY" && out.mode !== "IN FRAME") { wasReady = true; return null; }   // never nag mid-movement
+  const guide = framingGuide(lm);
+  if (guide) {
+    readySince = 0;
+    if (wasReady || (guide !== lastGuide && now - lastGuideAt > 3000)) {
+      lastGuide = guide; lastGuideAt = now; wasReady = false; say(guide);
+    }
+    return guide;
+  }
+  if (!readySince) readySince = now;
+  if (now - readySince > 900 && !wasReady) {
+    wasReady = true; sfx.ready(); say("you're in frame — ready when you are", true);
+  }
+  return wasReady ? null : "hold still…";
+}
+
+// ================= movement announcements =================
+const ACTIVE = new Set(["HANDSTAND", "PUSH-UP", "PLANK", "SQUAT", "PULL-UP", "FRONT LEVER", "L-SIT", "PIKE", "BRIDGE"]);
+const MODE_SAY = { HANDSTAND: "handstand — timer running", "PUSH-UP": "push-ups — counting", PLANK: "plank detected — hold it",
+  SQUAT: "squats — counting", "PULL-UP": "pull-ups — counting", "FRONT LEVER": "front lever — hold it",
+  "L-SIT": "L-sit — hold it", PIKE: "pike fold — sink into it", BRIDGE: "bridge — push up" };
+let prevMode = "READY", toast = null, milestoneNext = 0;
+function announceTick(out, now) {
+  if (out.mode !== prevMode) {
+    if (ACTIVE.has(out.mode)) {
+      toast = { text: out.mode, until: now + 1600 };
+      say(MODE_SAY[out.mode] || out.mode, true);
+      milestoneNext = 10;
+    }
+    prevMode = out.mode;
+  }
+  if (out.holdSecs != null && out.holdSecs >= milestoneNext) {
+    sfx.milestone(); say(`${milestoneNext} seconds`, true); milestoneNext += 10;
+  }
+}
+
+// ================= canvas HUD =================
+let lastCue = "", lastCueAt = 0;
+function setCue(c) { const now = performance.now();
+  if (c && c !== lastCue && now - lastCueAt > 1200) { lastCue = c; lastCueAt = now; }
+  if (!c) lastCue = ""; }
+function scoreCol(s) { return s >= 85 ? "#4cae6a" : s >= 65 ? "#e0a73a" : "#f0564b"; }
+const MODE_COL = { HANDSTAND: null, "PUSH-UP": "#58a6ff", PLANK: "#a371f7", SQUAT: "#d29922", "PULL-UP": "#3fb950",
+  "FRONT LEVER": "#f0564b", "L-SIT": "#e0a73a", PIKE: "#4cae6a", BRIDGE: "#db61a2", "IN FRAME": "#9aa4ad", READY: "#9aa4ad" };
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function pill(text, cx, y, font, fg, bg = "#0d1014b8") {
+  ctx.font = font;
+  const w = ctx.measureText(text).width;
+  ctx.fillStyle = bg; roundRect(cx - w / 2 - 16, y - 8, w + 32, parseInt(font) * 1.7, 14); ctx.fill();
+  ctx.fillStyle = fg; ctx.fillText(text, cx - w / 2, y);
+}
+function paintHUD(out, guide) {
+  const W = canvas.width, H = canvas.height, s = Math.min(W, H) / 720;
+  ctx.save(); ctx.textBaseline = "top";
+  ctx.font = `800 ${28 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillStyle = "#ffffffd9"; ctx.fillText("CALI", 24 * s, 22 * s);
+  ctx.fillStyle = "#e0a73a"; ctx.fillText("COACH", 24 * s + ctx.measureText("CALI ").width, 22 * s);
+  const bits = [out.mode];
+  if (out.holdSecs != null) bits.push(out.holdSecs.toFixed(1) + "s");
+  if (out.reps != null) bits.push(out.reps + " reps");
+  if (duel.on) bits.push(`⚔ ${duel.turn}`);
+  pill(bits.join("  ·  "), W / 2, 26 * s, `700 ${22 * s}px -apple-system,system-ui,sans-serif`, "#e9eef3");
+  if (guide) pill(guide, W / 2, H * 0.62, `700 ${26 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a");
+  if (out.score != null) {
+    ctx.font = `800 ${110 * s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillStyle = scoreCol(out.score);
+    ctx.shadowColor = "#000"; ctx.shadowBlur = 18 * s;
+    ctx.fillText(String(Math.round(out.score)), 26 * s, H - 150 * s);
+    ctx.shadowBlur = 0;
+  }
+  if (lastCue) pill(lastCue, W / 2, H - 52 * s, `700 ${24 * s}px -apple-system,system-ui,sans-serif`, "#e9eef3");
+  const now = performance.now();
+  if (toast && now < toast.until) {
+    ctx.globalAlpha = Math.min(1, (toast.until - now) / 400);
+    pill("● " + toast.text, W / 2, H * 0.40, `800 ${44 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a", "#0d1014d9");
+    ctx.globalAlpha = 1;
+  } else if (toast && now >= toast.until) toast = null;
+  ctx.restore();
+}
+
+// ================= confetti + PB =================
+let particles = [], banner = null;
+function celebrate(text) {
+  banner = { text, until: performance.now() + 3200 };
+  const cols = ["#e0a73a", "#4cae6a", "#58a6ff", "#db61a2", "#f0564b", "#ffffff"];
+  for (let i = 0; i < 160; i++) particles.push({
+    x: canvas.width / 2, y: canvas.height * 0.42, vx: (Math.random() - 0.5) * 16, vy: -Math.random() * 18 - 4,
+    c: cols[i % cols.length], r: 4 + Math.random() * 6, rot: Math.random() * 6.3, vr: (Math.random() - 0.5) * 0.4 });
+  sfx.pb(); say(text, true);
+}
+function paintParty(now) {
+  const s = Math.min(canvas.width, canvas.height) / 720;
+  particles = particles.filter(pt => pt.y < canvas.height + 30);
+  for (const pt of particles) {
+    pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.5; pt.rot += pt.vr;
+    ctx.save(); ctx.translate(pt.x, pt.y); ctx.rotate(pt.rot);
+    ctx.fillStyle = pt.c; ctx.fillRect(-pt.r / 2, -pt.r / 2, pt.r, pt.r * 1.6); ctx.restore();
+  }
+  if (banner && now < banner.until) {
+    ctx.save(); ctx.textBaseline = "top";
+    pill(banner.text, canvas.width / 2, canvas.height * 0.31, `800 ${52 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a", "#0d1014d9");
+    ctx.restore();
+  } else if (banner && now >= banner.until) banner = null;
+}
+const pbs = JSON.parse(localStorage.getItem("caliPBs") || "{}");
+function checkPB(e) {
+  const k = e.type, prev = pbs[k] || { secs: 0, avg: 0 };
+  let msg = null;
+  if ("secs" in e && e.secs > prev.secs) msg = `NEW PB — ${e.secs}s ${k.replace("_", " ")}`;
+  else if (e.avg > prev.avg + 0.5) msg = `NEW BEST FORM — ${Math.round(e.avg)}`;
+  if (msg) {
+    pbs[k] = { secs: Math.max(prev.secs, e.secs ?? 0), avg: Math.max(prev.avg, e.avg) };
+    localStorage.setItem("caliPBs", JSON.stringify(pbs));
+    celebrate(msg); e.pb = true;
+  }
+}
+
+// ================= history (localStorage journal) =================
+const journal = JSON.parse(localStorage.getItem("caliJournal") || "[]");
+function journalAdd(e) {
+  journal.push({ type: e.type, secs: e.secs, reps: e.reps, avg: e.avg, pb: !!e.pb, player: e.player, at: e.at });
+  if (journal.length > 2000) journal.splice(0, journal.length - 2000);
+  localStorage.setItem("caliJournal", JSON.stringify(journal));
+}
+function streak() {
+  const days = new Set(journal.map(j => j.at.slice(0, 10)));
+  let n = 0; const d = new Date();
+  for (;;) {
+    const key = d.toISOString().slice(0, 10);
+    if (days.has(key)) { n++; d.setDate(d.getDate() - 1); }
+    else if (n === 0 && key === new Date().toISOString().slice(0, 10)) { d.setDate(d.getDate() - 1); } // today not trained yet
+    else break;
+    if (n > 3650) break;
+  }
+  return n;
+}
+
+// ================= duel mode =================
+const duel = { on: false, turn: "A", scores: { A: [], B: [] } };
+function duelTick(e) {
+  if (!duel.on) return;
+  e.player = duel.turn;
+  duel.scores[duel.turn].push(e.avg);
+  duel.turn = duel.turn === "A" ? "B" : "A";
+  say(`Player ${duel.turn}, you're up`, true);
+}
+
+// ================= freeze-frame "why this score" =================
+let bestShot = null, lastShotAt = 0;
+function shotTick(lm, out, now) {
+  if (!ACTIVE.has(out.mode) || out.score == null) return;
+  if ((!bestShot || out.score > bestShot.score) && now - lastShotAt > 400) {
+    lastShotAt = now;
+    let angles = null;
+    if (out.mode === "HANDSTAND" && lm) {
+      const C = chain(lm, pickSide(lm));
+      const r = handstandScore(C.wri, C.sho, C.hip, C.kne, C.ank);
+      angles = { shoulder: Math.round(r.shoulder), hip: Math.round(r.hip), knee: Math.round(r.knee), lean: Math.round(r.lean * 10) / 10 };
+    }
+    bestShot = { url: canvas.toDataURL("image/jpeg", 0.7), score: out.score, angles };
+  }
+}
+
+// ================= auto-record =================
+const MIME = ["video/mp4", "video/webm;codecs=vp9", "video/webm"].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+let rec = null, recChunks = [], recStopTimer = 0, canvasStream = null, wasActive = false;
+function recStart() {
+  if (!MIME || rec) return;
+  canvasStream ||= canvas.captureStream(30);
+  recChunks = [];
+  rec = new MediaRecorder(canvasStream, { mimeType: MIME, videoBitsPerSecond: 6_000_000 });
+  rec.ondataavailable = ev => { if (ev.data.size) recChunks.push(ev.data); };
+  rec.start(1000);
+  $("recdot").hidden = false;
+}
+function recStop(attachTo) {
+  if (!rec) return;
+  const r = rec; rec = null; $("recdot").hidden = true;
+  r.onstop = () => {
+    if (recChunks.length && attachTo) {
+      attachTo.clip = URL.createObjectURL(new Blob(recChunks, { type: MIME }));
+      attachTo.clipExt = MIME.startsWith("video/mp4") ? "mp4" : "webm";
+    }
+    recChunks = [];
+  };
+  r.stop();
+}
+function recTick(out) {
+  const active = ACTIVE.has(out.mode);
+  if (active && !wasActive) { clearTimeout(recStopTimer); recStopTimer = 0; recStart(); }
+  if (!active && wasActive && rec && !recStopTimer)
+    recStopTimer = setTimeout(() => { recStopTimer = 0; recStop(session[session.length - 1]); }, 2000);
+  wasActive = active;
+}
+
+// ================= tilt compensation (beta, off by default) =================
+let tiltOn = JSON.parse(localStorage.getItem("caliTilt") ?? "false");
+let deviceRoll = 0;
+function requestTilt() {
+  const handler = ev => {
+    const o = (screen.orientation?.type || "portrait").startsWith("portrait");
+    deviceRoll = (o ? ev.gamma : ev.beta) ?? 0;
+  };
+  if (typeof DeviceOrientationEvent !== "undefined" && DeviceOrientationEvent.requestPermission) {
+    DeviceOrientationEvent.requestPermission().then(p => { if (p === "granted") addEventListener("deviceorientation", handler); }).catch(() => {});
+  } else addEventListener("deviceorientation", handler);
+}
+function levelLandmarks(lm) {
+  if (!tiltOn || !lm || Math.abs(deviceRoll) < 1.5 || Math.abs(deviceRoll) > 15) return lm;
+  const th = -deviceRoll * Math.PI / 180, W = canvas.width, H = canvas.height;
+  const cos = Math.cos(th), sin = Math.sin(th);
+  return lm.map(p => {
+    const px = p.x * W - W / 2, py = p.y * H - H / 2;
+    return { x: (px * cos - py * sin + W / 2) / W, y: (px * sin + py * cos + H / 2) / H, visibility: p.visibility };
+  });
+}
+
+// ================= skeleton + ghost =================
+const SKEL = [[11,13],[13,15],[12,14],[14,16],[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+function draw(lm, col) {
+  ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.lineCap = "round";
+  for (const [a, b] of SKEL) {
+    if ((lm[a].visibility ?? 1) < 0.4 || (lm[b].visibility ?? 1) < 0.4) continue;
+    ctx.beginPath(); ctx.moveTo(lm[a].x * canvas.width, lm[a].y * canvas.height);
+    ctx.lineTo(lm[b].x * canvas.width, lm[b].y * canvas.height); ctx.stroke();
+  }
+  ctx.fillStyle = col;
+  for (const i of [11,12,13,14,15,16,23,24,25,26,27,28]) {
+    if ((lm[i].visibility ?? 1) < 0.4) continue;
+    ctx.beginPath(); ctx.arc(lm[i].x * canvas.width, lm[i].y * canvas.height, 6, 0, 7); ctx.fill();
+  }
+}
+function ghostLine(lm) {
+  const side = (lm[15].visibility ?? 0) >= (lm[16].visibility ?? 0) ? 15 : 16;
+  const x = lm[side].x * canvas.width;
+  ctx.save();
+  ctx.setLineDash([14, 10]); ctx.lineWidth = 3; ctx.strokeStyle = "#e0a73a88";
+  ctx.beginPath(); ctx.moveTo(x, lm[side].y * canvas.height); ctx.lineTo(x, 0); ctx.stroke();
+  ctx.restore();
+}
+
+// ================= the loop =================
+function loop() {
+  requestAnimationFrame(loop);
+  if (!landmarker || video.readyState < 2) return;
+  ctx.save();
+  if (mirrored) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const res = landmarker.detectForVideo(video, performance.now());
+  const lm = levelLandmarks(res.landmarks?.[0] ?? null);
+  const now = performance.now();
+
+  const out = engine.feed(lm, now);
+  const guide = framingTick(lm, out, now);
+  announceTick(out, now);
+  setCue(out.cue);
+  if (out.cue) say(out.cue);
+  if (lm) draw(lm, out.mode === "HANDSTAND" ? scoreCol(out.score ?? 50) : (MODE_COL[out.mode] || "#9aa4ad"));
+  if (lm && out.mode === "HANDSTAND") ghostLine(lm);
+  shotTick(lm, out, now);
+  paintHUD(out, guide);
+  paintParty(now);
+  ctx.restore();
+  recTick(out);
+
+  if (session.length > announced) {
+    const e = session[session.length - 1]; announced = session.length;
+    const prevReps = e.reps;
+    if (bestShot) { e.shot = bestShot.url; e.angles = bestShot.angles; bestShot = null; }
+    checkPB(e);
+    duelTick(e);
+    journalAdd(e);
+    if (!e.pb) { if ("secs" in e) say(`${e.secs} seconds, score ${Math.round(e.avg)}`, true);
+                 else say(`${prevReps} reps, average ${Math.round(e.avg)}`, true); }
+  }
+  // rep tick sound
+  if (out.reps != null && out.reps > (loop._reps ?? 0)) sfx.rep();
+  loop._reps = out.reps ?? 0;
+}
+
+// ================= panel: session / history / settings =================
+const NAMES = { handstand: "Handstand", plank: "Plank", front_lever: "Front lever", lsit: "L-sit",
+  pike: "Pike fold", bridge: "Bridge", pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups" };
+
+$("sessionbtn").onclick = () => { renderSession(); $("panel").classList.add("open"); };
+$("historybtn").onclick = () => { renderHistory(); $("panel").classList.add("open"); };
+$("settings").onclick = () => { renderSettings(); $("panel").classList.add("open"); };
+$("closepanel").onclick = () => $("panel").classList.remove("open");
+
+const fmt = (e, i) => {
+  const at = e.at.includes("T") ? e.at.slice(11, 19) : e.at;
+  const pb = e.pb ? ' <span style="color:#e0a73a">★ PB</span>' : "";
+  const player = e.player ? ` <span style="color:#58a6ff">[${e.player}]</span>` : "";
+  const stats = "secs" in e && e.secs != null
+    ? `${e.secs}s · score <b>${e.avg}</b>${e.min != null ? ` (min ${e.min})` : ""}`
+    : `${e.reps} reps · avg <b>${e.avg}</b>${e.scores ? ` · [${e.scores.join(", ")}]` : ""}`;
+  const btn = (label, fn) => `<button class="sec" style="width:auto;padding:8px 14px;font-size:13px" onclick="${fn}(${i})">${label}</button>`;
+  const share = `<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">` +
+    (e.clip ? btn("🎬 Share clip", "shareClip") : "") + btn("🖼 Share card", "shareCard") +
+    (e.shot ? btn("📐 Why this score", "showWhy") : "") + `</div>`;
+  return `<div class="item"><b>${NAMES[e.type] || e.type}</b>${pb}${player} · ${stats} · ${at}${share}</div>`;
+};
+function renderSession() {
+  $("paneltitle").textContent = "Session";
+  $("coachout").hidden = true;
+  $("coachbtn").hidden = session.length === 0;
+  let head = "";
+  if (duel.on) {
+    const best = p => duel.scores[p].length ? Math.max(...duel.scores[p]) : 0;
+    const crown = best("A") === best("B") ? "" : best("A") > best("B") ? "A" : "B";
+    head = `<div class="item">⚔ <b>DUEL</b> — A best <b>${best("A") || "–"}</b> vs B best <b>${best("B") || "–"}</b> ${crown ? "· 👑 Player " + crown : ""} · next up: <b>${duel.turn}</b></div>`;
+  }
+  $("panelbody").innerHTML = head + (session.length === 0
+    ? '<div class="item">Nothing yet. Get in frame — it announces what it sees.</div>'
+    : session.map((e, i) => fmt(e, i)).join(""));
+}
+function renderHistory() {
+  $("paneltitle").textContent = "History";
+  $("coachbtn").hidden = true; $("coachout").hidden = true;
+  if (!journal.length) { $("panelbody").innerHTML = '<div class="item">No history yet — it saves automatically.</div>'; return; }
+  const s = streak();
+  const byType = {};
+  for (const j of journal) (byType[j.type] ||= []).push(j);
+  const bests = Object.entries(byType).map(([k, v]) => {
+    const bAvg = Math.max(...v.map(x => x.avg));
+    const bSecs = Math.max(...v.map(x => x.secs || 0));
+    return `<div class="item"><b>${NAMES[k] || k}</b> · ${v.length} sessions · best score <b>${bAvg}</b>${bSecs ? ` · best hold <b>${bSecs}s</b>` : ""}</div>`;
+  }).join("");
+  const days = {};
+  for (const j of journal.slice(-200)) (days[j.at.slice(0, 10)] ||= []).push(j);
+  const recent = Object.entries(days).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14).map(([d, v]) =>
+    `<div class="item">${d} · ${v.length} entries · avg <b>${Math.round(v.reduce((a, x) => a + x.avg, 0) / v.length)}</b>${v.some(x => x.pb) ? ' · <span style="color:#e0a73a">★</span>' : ""}</div>`).join("");
+  $("panelbody").innerHTML = `<div class="item">🔥 Streak: <b>${s} day${s === 1 ? "" : "s"}</b> · ${journal.length} lifetime entries</div>` + bests + recent;
+}
+function renderSettings() {
+  $("paneltitle").textContent = "Settings";
+  $("coachbtn").hidden = true; $("coachout").hidden = true;
+  $("panelbody").innerHTML = `
+    <div class="item">⚔ Duel mode (two athletes alternate attempts)
+      <button class="${duel.on ? "gold" : "sec"}" style="margin-top:8px" id="dueltoggle">${duel.on ? "Duel ON — tap to end" : "Start duel"}</button></div>
+    <div class="item">📐 Auto-level (beta) — corrects a tilted camera on phones. Live tilt: <b id="tiltval">${deviceRoll.toFixed(1)}°</b>
+      <button class="${tiltOn ? "gold" : "sec"}" style="margin-top:8px" id="tilttoggle">${tiltOn ? "Auto-level ON" : "Auto-level OFF"}</button></div>
+    <div class="item">Anthropic API key (optional — unlocks the AI coach; stored only in this browser):
+      <input id="apikey" type="password" placeholder="sk-ant-…" value="${localStorage.getItem("caliKey") || ""}">
+      <button class="gold" style="margin-top:8px" id="savekey">Save</button></div>
+    <div class="item" style="color:var(--sub)">Video never leaves this device — only the numeric session summary is sent to Claude when you ask the coach.</div>`;
+  $("savekey").onclick = () => { localStorage.setItem("caliKey", $("apikey").value.trim()); $("panel").classList.remove("open"); };
+  $("dueltoggle").onclick = () => { duel.on = !duel.on;
+    if (duel.on) { duel.turn = "A"; duel.scores = { A: [], B: [] }; say("Duel on. Player A, you're up", true); }
+    renderSettings(); };
+  $("tilttoggle").onclick = () => { tiltOn = !tiltOn; localStorage.setItem("caliTilt", JSON.stringify(tiltOn)); renderSettings(); };
+  const iv = setInterval(() => { const el = $("tiltval"); if (!el) return clearInterval(iv); el.textContent = deviceRoll.toFixed(1) + "°"; }, 300);
+}
+
+// ================= share =================
+async function shareFile(file, text) {
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], text }); return; } catch {}
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+}
+window.shareClip = async i => {
+  const e = session[i];
+  const blob = await (await fetch(e.clip)).blob();
+  shareFile(new File([blob], `cali-${e.type}.${e.clipExt}`, { type: blob.type }),
+            `${(NAMES[e.type] || e.type)} — score ${Math.round(e.avg)} on Cali Coach`);
+};
+window.shareCard = i => {
+  const e = session[i];
+  const c = document.createElement("canvas"); c.width = 1080; c.height = 1920;
+  const x = c.getContext("2d");
+  const g = x.createLinearGradient(0, 0, 0, 1920);
+  g.addColorStop(0, "#11161d"); g.addColorStop(1, "#0d1014");
+  x.fillStyle = g; x.fillRect(0, 0, 1080, 1920);
+  x.textAlign = "center"; x.textBaseline = "top";
+  x.font = "800 72px -apple-system,system-ui,sans-serif";
+  x.fillStyle = "#e9eef3"; x.fillText("CALI COACH", 540, 200);
+  x.font = "700 58px -apple-system,system-ui,sans-serif"; x.fillStyle = "#9aa4ad";
+  x.fillText((NAMES[e.type] || e.type).toUpperCase(), 540, 360);
+  x.beginPath(); x.arc(540, 830, 300, -Math.PI / 2, -Math.PI / 2 + (e.avg / 100) * Math.PI * 2);
+  x.lineWidth = 40; x.strokeStyle = "#e0a73a"; x.lineCap = "round"; x.stroke();
+  x.beginPath(); x.arc(540, 830, 300, 0, Math.PI * 2); x.lineWidth = 6; x.strokeStyle = "#2a313a"; x.stroke();
+  x.font = "800 240px -apple-system,system-ui,sans-serif"; x.fillStyle = "#e0a73a";
+  x.textBaseline = "middle"; x.fillText(String(Math.round(e.avg)), 540, 830);
+  x.textBaseline = "top"; x.font = "700 64px -apple-system,system-ui,sans-serif"; x.fillStyle = "#e9eef3";
+  const sub = "secs" in e && e.secs != null ? `${e.secs}s hold` : `${e.reps} reps`;
+  x.fillText(sub + (e.pb ? "  ·  NEW PB" : ""), 540, 1230);
+  x.font = "500 44px -apple-system,system-ui,sans-serif"; x.fillStyle = "#9aa4ad";
+  x.fillText(new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long" }), 540, 1340);
+  x.fillStyle = "#e0a73a"; x.font = "700 46px -apple-system,system-ui,sans-serif";
+  x.fillText("caliunity.com", 540, 1720);
+  c.toBlob(b => shareFile(new File([b], `cali-${e.type}.png`, { type: "image/png" }),
+                          `${NAMES[e.type] || e.type} on Cali Coach`), "image/png");
+};
+window.showWhy = i => {
+  const e = session[i];
+  $("paneltitle").textContent = "Why this score";
+  const a = e.angles;
+  const rows = a ? `<div class="item">Shoulder line: <b>${a.shoulder}°</b> (180° = open) · Hip line: <b>${a.hip}°</b> (180° = no banana) ·
+    Knees: <b>${a.knee}°</b> · Lean: <b>${a.lean}°</b> off vertical</div>` :
+    `<div class="item">Best moment captured below — per-joint angle breakdown lands for more movements soon.</div>`;
+  $("panelbody").innerHTML = `<img src="${e.shot}" style="width:100%;border-radius:12px">` + rows +
+    `<div class="item" style="color:var(--sub)">Score ${e.avg} — this frame was your best moment.</div>`;
+  $("coachbtn").hidden = true;
+};
+
+// ================= AI coach =================
+$("coachbtn").onclick = async () => {
+  const key = localStorage.getItem("caliKey");
+  const out = $("coachout"); out.hidden = false;
+  if (!key) { out.textContent = "No API key set — add one in ⚙ settings to unlock the AI coach."; return; }
+  out.textContent = "coach is thinking…";
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01",
+                 "anthropic-dangerous-direct-browser-access": "true", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 350,
+        system: "You are the Cali calisthenics coach: direct, warm, expert. British English. Never use em dashes or en dashes. Given session data (handstand alignment and plank line scores out of 100; push-up scores from depth, body line, lockout; squat scores from depth, torso, lockout; pull-up scores from range of motion; front lever from hip line and horizontality; L-sit from leg height; pike fold and bridge from joint angles, all out of 100), give: 1) one-line verdict, 2) the single biggest fix with a concrete drill, 3) one thing they did well. Max 90 words.",
+        messages: [{ role: "user", content: "Session data: " + JSON.stringify(session.map(({ clip, shot, ...rest }) => rest)) }] }) });
+    const j = await r.json();
+    out.textContent = j.content?.[0]?.text || ("API error: " + JSON.stringify(j.error || j).slice(0, 300));
+  } catch (e) { out.textContent = "network error: " + e.message; }
+};
+
+// ================= PWA =================
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
