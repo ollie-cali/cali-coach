@@ -164,6 +164,8 @@ function paintHUD(out, guide) {
   ctx.font = `800 ${28 * s}px -apple-system,system-ui,sans-serif`;
   ctx.fillStyle = "#ffffffd9"; ctx.fillText("CALI", 24 * s, 22 * s);
   ctx.fillStyle = "#e0a73a"; ctx.fillText("COACH", 24 * s + ctx.measureText("CALI ").width, 22 * s);
+  ctx.font = `700 ${13 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillStyle = "#4cae6a"; ctx.fillText("✓ VERIFIED · scored live on-device", 24 * s, 54 * s);
   const bits = [out.mode];
   if (out.holdSecs != null) bits.push(out.holdSecs.toFixed(1) + "s");
   if (out.reps != null) bits.push(out.reps + " reps");
@@ -538,7 +540,13 @@ function renderSession() {
     const crown = best("A") === best("B") ? "" : best("A") > best("B") ? "A" : "B";
     head = `<div class="item">⚔ <b>DUEL</b> — A best <b>${best("A") || "–"}</b> vs B best <b>${best("B") || "–"}</b> ${crown ? "· 👑 Player " + crown : ""} · next up: <b>${duel.turn}</b></div>`;
   }
-  $("panelbody").innerHTML = head + (session.length === 0
+  const shareRow = session.length === 0 ? "" :
+    `<div class="item" style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="gold" style="width:auto;padding:10px 16px" onclick="shareSessionCard()">🖼 Share session</button>
+      <button class="sec" style="width:auto;padding:10px 16px" onclick="copyCaption()">📋 IG caption</button>
+      <button class="sec" style="width:auto;padding:10px 16px" onclick="shareStrava()">🟠 Strava</button>
+    </div>`;
+  $("panelbody").innerHTML = shareRow + head + (session.length === 0
     ? '<div class="item">Nothing yet. Get in frame — it announces what it sees.</div>'
     : session.map((e, i) => fmt(e, i)).join(""));
 }
@@ -595,6 +603,69 @@ function renderSettings() {
   const iv = setInterval(() => { const el = $("tiltval"); if (!el) return clearInterval(iv); el.textContent = deviceRoll.toFixed(1) + "°"; }, 300);
 }
 
+// ================= captions + Strava + session card =================
+function entryLine(e) {
+  const n = NAMES[e.type] || e.type;
+  return "secs" in e && e.secs != null
+    ? `${n} ${e.secs}s · ${Math.round(e.avg)}/100${e.boardStability != null ? ` · base ${e.boardStability}` : ""}${e.pb ? " ★PB" : ""}`
+    : `${n} ${e.reps} reps · avg ${Math.round(e.avg)}${e.pb ? " ★PB" : ""}`;
+}
+function buildCaption() {
+  const lines = session.map(entryLine).join("\n");
+  const pbs = session.filter(e => e.pb).length;
+  return `${lines}\n\n✓ Cali Verified — scored live by AI, on-device 🤸${pbs ? `\n${pbs} new PB${pbs > 1 ? "s" : ""} today` : ""}\ncaliunity.com  #calisthenics #caliverified #handstand`;
+}
+window.copyCaption = async () => {
+  try { await navigator.clipboard.writeText(buildCaption()); say("caption copied", true); }
+  catch { }
+};
+window.shareStrava = async () => {
+  // TODAY: copy the summary + open Strava's manual entry. PROPER: OAuth edge fn (in the CaliDev package).
+  try { await navigator.clipboard.writeText("Cali Coach session\n" + buildCaption()); } catch {}
+  window.open("https://www.strava.com/upload/manual", "_blank");
+};
+window.shareSessionCard = () => {
+  const c = document.createElement("canvas"); c.width = 1080; c.height = 1920;
+  const x = c.getContext("2d");
+  const g = x.createLinearGradient(0, 0, 0, 1920);
+  g.addColorStop(0, "#11161d"); g.addColorStop(1, "#0d1014");
+  x.fillStyle = g; x.fillRect(0, 0, 1080, 1920);
+  x.textAlign = "center"; x.textBaseline = "top";
+  x.font = "800 84px -apple-system,system-ui,sans-serif";
+  x.fillStyle = "#e9eef3"; x.fillText("CALI COACH", 540, 130);
+  x.font = "700 40px -apple-system,system-ui,sans-serif"; x.fillStyle = "#4cae6a";
+  x.fillText("✓ VERIFIED SESSION — scored live by AI", 540, 240);
+  x.font = "500 40px -apple-system,system-ui,sans-serif"; x.fillStyle = "#9aa4ad";
+  const st = streak();
+  x.fillText(new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }) + (st > 1 ? `  ·  🔥 ${st}-day streak` : ""), 540, 320);
+  // entries
+  let y = 460;
+  x.textAlign = "left";
+  for (const e of session.slice(0, 9)) {
+    x.font = "700 46px -apple-system,system-ui,sans-serif"; x.fillStyle = "#e9eef3";
+    x.fillText(NAMES[e.type] || e.type, 110, y);
+    x.textAlign = "right";
+    const stat = "secs" in e && e.secs != null ? `${e.secs}s · ${Math.round(e.avg)}` : `${e.reps} × avg ${Math.round(e.avg)}`;
+    x.fillStyle = e.pb ? "#e0a73a" : "#9aa4ad";
+    x.fillText(stat + (e.pb ? " ★" : ""), 970, y);
+    x.textAlign = "left";
+    y += 96;
+    x.strokeStyle = "#222a33"; x.beginPath(); x.moveTo(110, y - 28); x.lineTo(970, y - 28); x.stroke();
+  }
+  // footer totals
+  const pbs = session.filter(e => e.pb).length;
+  const holds = session.filter(e => "secs" in e && e.secs != null);
+  const bestScore = Math.max(...session.map(e => e.avg));
+  x.textAlign = "center";
+  x.font = "800 120px -apple-system,system-ui,sans-serif"; x.fillStyle = "#e0a73a";
+  x.fillText(`${session.length} movements${pbs ? ` · ${pbs} PB${pbs > 1 ? "s" : ""}` : ""}`, 540, Math.max(y + 60, 1450));
+  x.font = "600 44px -apple-system,system-ui,sans-serif"; x.fillStyle = "#9aa4ad";
+  x.fillText(`best score ${Math.round(bestScore)}${holds.length ? ` · longest hold ${Math.max(...holds.map(h => h.secs))}s` : ""}`, 540, Math.max(y + 210, 1600));
+  x.fillStyle = "#e0a73a"; x.font = "700 46px -apple-system,system-ui,sans-serif";
+  x.fillText("caliunity.com", 540, 1780);
+  c.toBlob(b => shareFile(new File([b], "cali-session.png", { type: "image/png" }), buildCaption()), "image/png");
+};
+
 // ================= share =================
 async function shareFile(file, text) {
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -619,8 +690,10 @@ window.shareCard = i => {
   x.textAlign = "center"; x.textBaseline = "top";
   x.font = "800 72px -apple-system,system-ui,sans-serif";
   x.fillStyle = "#e9eef3"; x.fillText("CALI COACH", 540, 200);
+  x.font = "700 34px -apple-system,system-ui,sans-serif"; x.fillStyle = "#4cae6a";
+  x.fillText("✓ VERIFIED — scored live by AI", 540, 292);
   x.font = "700 58px -apple-system,system-ui,sans-serif"; x.fillStyle = "#9aa4ad";
-  x.fillText((NAMES[e.type] || e.type).toUpperCase(), 540, 360);
+  x.fillText((NAMES[e.type] || e.type).toUpperCase(), 540, 372);
   x.beginPath(); x.arc(540, 830, 300, -Math.PI / 2, -Math.PI / 2 + (e.avg / 100) * Math.PI * 2);
   x.lineWidth = 40; x.strokeStyle = "#e0a73a"; x.lineCap = "round"; x.stroke();
   x.beginPath(); x.arc(540, 830, 300, 0, Math.PI * 2); x.lineWidth = 6; x.strokeStyle = "#2a313a"; x.stroke();
