@@ -1,0 +1,53 @@
+<!doctype html>
+<!-- CALI HOME MIRROR — turns any phone/tablet into the board's screen.
+     The filming phone (Cali Coach) broadcasts its coached view over WebRTC;
+     this page receives it fullscreen. Pair with the 4-character code. -->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>CaliHome Mirror</title>
+<style>
+  *{box-sizing:border-box;font-family:-apple-system,system-ui,sans-serif}
+  html,body{margin:0;height:100%;background:#0d1014;color:#e9eef3;overflow:hidden}
+  #pair{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+  h1{margin:0;font-size:30px} h1 b{color:#e0a73a}
+  input{background:#161b22;border:1px solid #2a313a;color:#e0a73a;border-radius:14px;padding:16px;font-size:34px;
+    width:220px;text-align:center;letter-spacing:10px;text-transform:uppercase;font-weight:800}
+  button{background:#e0a73a;color:#1a1205;border:0;border-radius:12px;padding:14px 28px;font-size:17px;font-weight:700}
+  p{color:#9aa4ad;max-width:320px;text-align:center;font-size:14px;margin:0}
+  video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000;display:none}
+  #status{position:fixed;top:14px;left:0;right:0;text-align:center;color:#9aa4ad;font-size:13px;pointer-events:none}
+</style></head><body>
+<div id="pair">
+  <h1>CALI<b>HOME</b> MIRROR</h1>
+  <p>On the filming phone: Cali Coach → ⚙ → <b>Mirror to a screen</b>. Enter its code here.</p>
+  <input id="code" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off">
+  <button id="go">Connect</button>
+  <p id="msg"></p>
+</div>
+<video id="v" playsinline autoplay muted></video>
+<div id="status"></div>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+function connect() {
+  const code = $("code").value.trim().toUpperCase();
+  if (code.length !== 4) { $("msg").textContent = "enter the 4-character code"; return; }
+  $("msg").textContent = "connecting…";
+  const peer = new Peer();
+  peer.on("open", () => {
+    const conn = peer.connect("cali-" + code);        // data channel wakes the caster
+    conn.on("open", () => conn.send("mirror-hello"));
+    peer.on("call", call => {
+      call.answer();                                   // receive-only
+      call.on("stream", s => {
+        $("v").srcObject = s; $("v").style.display = "block"; $("pair").style.display = "none";
+        $("status").textContent = "CaliHome mirror · live";
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      });
+    });
+  });
+  peer.on("error", e => { $("msg").textContent = "couldn't connect — check the code (" + e.type + ")"; });
+}
+$("go").onclick = connect;
+$("code").addEventListener("keydown", e => { if (e.key === "Enter") connect(); });
+</script></body></html>

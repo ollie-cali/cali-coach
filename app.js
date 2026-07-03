@@ -168,6 +168,7 @@ function paintHUD(out, guide) {
   if (out.holdSecs != null) bits.push(out.holdSecs.toFixed(1) + "s");
   if (out.reps != null) bits.push(out.reps + " reps");
   if (duel.on) bits.push(`⚔ ${duel.turn}`);
+  if (board.dev && board.liveStab != null && out.mode === "HANDSTAND") bits.push(`base ${board.liveStab}`);
   pill(bits.join("  ·  "), W / 2, 26 * s, `700 ${22 * s}px -apple-system,system-ui,sans-serif`, "#e9eef3");
   if (guide) pill(guide, W / 2, H * 0.62, `700 ${26 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a");
   if (out.score != null) {
@@ -467,6 +468,7 @@ function loop() {
   if (lm) draw(lm, out.mode === "HANDSTAND" ? scoreCol(out.score ?? 50) : (MODE_COL[out.mode] || "#9aa4ad"));
   if (lm && out.mode === "HANDSTAND") ghostLine(lm);
   shotTick(lm, out, now);
+  boardScoreTick(out, now);
   paintHUD(out, guide);
   paintDebug(lm, out);
   paintParty(now);
@@ -518,7 +520,7 @@ const fmt = (e, i) => {
   const pb = e.pb ? ' <span style="color:#e0a73a">★ PB</span>' : "";
   const player = e.player ? ` <span style="color:#58a6ff">[${e.player}]</span>` : "";
   const stats = "secs" in e && e.secs != null
-    ? `${e.secs}s · score <b>${e.avg}</b>${e.min != null ? ` (min ${e.min})` : ""}`
+    ? `${e.secs}s · score <b>${e.avg}</b>${e.min != null ? ` (min ${e.min})` : ""}${e.boardStability != null ? ` · base <b>${e.boardStability}</b>` : ""}`
     : `${e.reps} reps · avg <b>${e.avg}</b>${e.scores ? ` · [${e.scores.join(", ")}]` : ""}`;
   const btn = (label, fn) => `<button class="sec" style="width:auto;padding:8px 14px;font-size:13px" onclick="${fn}(${i})">${label}</button>`;
   const share = `<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">` +
@@ -566,6 +568,10 @@ function renderSettings() {
       <button class="${duel.on ? "gold" : "sec"}" style="margin-top:8px" id="dueltoggle">${duel.on ? "Duel ON — tap to end" : "Start duel"}</button></div>
     <div class="item">📐 Auto-level (beta) — corrects a tilted camera on phones. Live tilt: <b id="tiltval">${deviceRoll.toFixed(1)}°</b>
       <button class="${tiltOn ? "gold" : "sec"}" style="margin-top:8px" id="tilttoggle">${tiltOn ? "Auto-level ON" : "Auto-level OFF"}</button></div>
+    <div class="item">🛹 CaliHome board — <button class="sec" style="width:auto;padding:8px 14px" id="boardbtn">${board.dev ? "connected ✓" : "Connect board"}</button>
+      <span style="color:var(--sub);font-size:13px"> live base-stability fuses with the camera score; the board glows your form colour</span></div>
+    <div class="item">📺 Mirror to a screen — prop any phone/tablet on the board, open <b>mirror.html</b> on it, enter the code:
+      <div id="mirrorrow" style="margin-top:8px"><button class="sec" id="mirrorbtn">Get mirror code</button></div></div>
     <div class="item">🐞 Debug overlay — live posture flags + measured angles
       <button class="${debugOn ? "gold" : "sec"}" style="margin-top:8px" id="debugtoggle">${debugOn ? "Debug ON" : "Debug OFF"}</button></div>
     <div class="item">Anthropic API key (optional — unlocks the AI coach; stored only in this browser):
@@ -578,6 +584,14 @@ function renderSettings() {
     renderSettings(); };
   $("tilttoggle").onclick = () => { tiltOn = !tiltOn; localStorage.setItem("caliTilt", JSON.stringify(tiltOn)); renderSettings(); };
   $("debugtoggle").onclick = () => { debugOn = !debugOn; localStorage.setItem("caliDebug", JSON.stringify(debugOn)); renderSettings(); };
+  $("boardbtn").onclick = async () => { try { await boardConnect(); renderSettings(); } catch (e) { say("board connection failed", true); } };
+  $("mirrorbtn").onclick = async () => {
+    $("mirrorbtn").textContent = "starting…";
+    try { const c = await mirrorStart();
+      $("mirrorrow").innerHTML = `<span style="font-size:30px;font-weight:800;letter-spacing:8px;color:var(--gold)">${c}</span>
+        <div style="color:var(--sub);font-size:13px;margin-top:4px">open mirror.html on the screen device and enter this code</div>`;
+    } catch { $("mirrorbtn").textContent = "mirror failed — retry"; }
+  };
   const iv = setInterval(() => { const el = $("tiltval"); if (!el) return clearInterval(iv); el.textContent = deviceRoll.toFixed(1) + "°"; }, 300);
 }
 
@@ -652,6 +666,72 @@ $("coachbtn").onclick = async () => {
     out.textContent = j.content?.[0]?.text || ("API error: " + JSON.stringify(j.error || j).slice(0, 300));
   } catch (e) { out.textContent = "network error: " + e.message; }
 };
+
+// ================= CaliHome board link (Web Bluetooth; firmware_v3 contract) =================
+const BOARD = { SVC: "ca110000-0000-1000-8000-00805f9b34fb",
+  HOLD: "ca110002-0000-1000-8000-00805f9b34fb", LIVE: "ca110007-0000-1000-8000-00805f9b34fb",
+  REC: "ca110003-0000-1000-8000-00805f9b34fb", CMD: "ca110005-0000-1000-8000-00805f9b34fb" };
+const board = { dev: null, cmd: null, live: null, holds: [], lastScoreSent: 0 };
+const dec2 = new TextDecoder();
+async function boardConnect() {
+  if (!navigator.bluetooth) { say("web bluetooth needs Chrome", true); return false; }
+  const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [BOARD.SVC] }] });
+  const srv = await (await dev.gatt.connect()).getPrimaryService(BOARD.SVC);
+  board.dev = dev; board.cmd = await srv.getCharacteristic(BOARD.CMD);
+  const hold = await srv.getCharacteristic(BOARD.HOLD);
+  await hold.startNotifications();
+  hold.addEventListener("characteristicvaluechanged", ev => {
+    const v = dec2.decode(ev.target.value);
+    if (v.startsWith("{")) {                            // board hold ended -> fusion pool
+      const h = JSON.parse(v);
+      board.holds.push({ secs: h.secs, stab: h.stab, endedAtMs: Date.now() });
+      // late-fuse onto the latest camera handstand within the window
+      for (let i = session.length - 1; i >= Math.max(0, session.length - 3); i--) {
+        const e = session[i];
+        if (e.type === "handstand" && !e.boardStability
+            && Math.abs(Date.parse(e.at) - Date.now()) < 4000
+            && Math.abs(e.secs - h.secs) <= 0.35 * Math.max(e.secs, h.secs)) {
+          e.boardStability = h.stab; say(`base stability ${h.stab}`, true); break;
+        }
+      }
+    }
+  });
+  try { board.live = await srv.getCharacteristic(BOARD.LIVE);
+    await board.live.startNotifications();
+    board.live.addEventListener("characteristicvaluechanged", ev => {
+      try { board.liveStab = JSON.parse(dec2.decode(ev.target.value)).stab; } catch {}
+    });
+  } catch {}
+  dev.addEventListener("gattserverdisconnected", () => { board.dev = null; say("board disconnected", true); });
+  say("CaliHome board connected", true);
+  return true;
+}
+async function boardScoreTick(out, now) {              // glow the board with the live camera score
+  if (!board.cmd || out.score == null || now - board.lastScoreSent < 700) return;
+  board.lastScoreSent = now;
+  try { await board.cmd.writeValue(new TextEncoder().encode("SCORE:" + Math.round(out.score))); } catch {}
+}
+
+// ================= mirror casting (board screen = any device on mirror.html) =================
+let mirrorPeer = null, mirrorCode = null;
+async function mirrorStart() {
+  if (mirrorPeer) return mirrorCode;
+  await new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js";
+    s.onload = res; s.onerror = rej; document.head.appendChild(s);
+  });
+  mirrorCode = Array.from({ length: 4 }, () => "ABCDEFGHJKMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 31)]).join("");
+  mirrorPeer = new Peer("cali-" + mirrorCode);
+  canvasStream ||= canvas.captureStream(30);
+  mirrorPeer.on("connection", conn => {
+    conn.on("data", () => {                            // mirror-hello -> call back with the canvas
+      mirrorPeer.call(conn.peer, canvasStream);
+      say("mirror connected", true);
+    });
+  });
+  return new Promise(res => mirrorPeer.on("open", () => res(mirrorCode)));
+}
 
 // ================= PWA =================
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
