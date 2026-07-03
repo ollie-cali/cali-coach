@@ -110,3 +110,78 @@ export class EMA {
   constructor(a) { this.a = a; this.v = null; }
   feed(x) { this.v = this.v === null ? x : this.a*x + (1-this.a)*this.v; return this.v; }
 }
+
+// ---------------- SQUAT ----------------
+export const SQ_TOP = 160, SQ_BOT = 100;
+
+export function squatDepthScore(minKnee) {
+  if (minKnee <= 90) return 100;
+  if (minKnee >= 130) return 0;
+  return (130 - minKnee) / 40 * 100;
+}
+export function squatTorsoScore(meanTorsoLean) { return Math.max(0, 100 - 2.5 * Math.max(0, meanTorsoLean - 20)); }
+
+export function rateSquat(minKnee, meanTorsoLean, topKnee) {
+  const d = squatDepthScore(minKnee), t = squatTorsoScore(meanTorsoLean);
+  const lock = topKnee >= 155 ? 100 : 50;
+  const score = 0.55*d + 0.35*t + 0.10*lock;
+  let cue;
+  if (d < 60) cue = "sit deeper — hip crease to the knee";
+  else if (t < 60) cue = "chest up — you're folding forward";
+  else if (lock < 100) cue = "stand all the way up";
+  else cue = "clean squat";
+  return { score, depth: d, torso: t, cue };
+}
+
+export class SquatCounter {
+  constructor() { this.state = "TOP"; this.minKnee = 180; this.leans = []; this.reps = []; }
+  feed(knee, torsoLean) {
+    if (this.state === "TOP") {
+      if (knee < SQ_TOP) { this.state = "DOWN"; this.minKnee = knee; this.leans = [torsoLean]; }
+    } else if (this.state === "DOWN") {
+      this.minKnee = Math.min(this.minKnee, knee); this.leans.push(torsoLean);
+      if (knee > this.minKnee + 15) this.state = "UP";
+    } else {
+      this.leans.push(torsoLean);
+      if (knee >= SQ_TOP) {
+        const mean = this.leans.reduce((a, b) => a+b, 0) / this.leans.length;
+        this.reps.push(rateSquat(this.minKnee, mean, knee));
+        this.state = "TOP";
+      }
+    }
+  }
+}
+
+// ---------------- PLANK ----------------
+export function plankScore(meanLineDev) { return Math.max(0, Math.min(100, 100 - 4*meanLineDev)); }
+
+// ---------------- PULL-UP ----------------
+export const PL_TOP = 160, PL_BOT = 90;
+
+export function pullupRomScore(minElbow) {
+  if (minElbow <= 60) return 100;
+  if (minElbow >= 110) return 0;
+  return (110 - minElbow) / 50 * 100;
+}
+export function ratePullup(minElbow) {
+  const r = pullupRomScore(minElbow);
+  return { score: r, rom: r, cue: r < 60 ? "pull higher — chin over the bar" : "clean pull-up" };
+}
+export class PullupCounter {
+  constructor() { this.state = "HANG"; this.minElbow = 180; this.reps = []; }
+  feed(elbow) {
+    if (this.state === "HANG") {
+      if (elbow < PL_TOP) { this.state = "PULL"; this.minElbow = elbow; }
+    } else if (this.state === "PULL") {
+      this.minElbow = Math.min(this.minElbow, elbow);
+      if (elbow > this.minElbow + 15) this.state = "LOWER";
+    } else if (elbow >= PL_TOP) {
+      this.reps.push(ratePullup(this.minElbow));
+      this.state = "HANG";
+    }
+  }
+}
+
+// posture helpers for the new modes
+export function isHanging(wri, sho, hip) { return wri[1] < sho[1] && sho[1] < hip[1]; }  // wrists above shoulders above hips
+export function torsoLean(sho, hip) { return leanFromVertical(hip, sho); }               // torso vs vertical (squat fault)
