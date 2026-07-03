@@ -240,11 +240,19 @@ export function isFrontLeverPose(C) {
   return C.wri[1] < C.sho[1] - 0.04 && Math.abs(C.sho[1]-C.ank[1]) < 0.15 && Math.abs(C.sho[0]-C.ank[0]) > 0.15;
 }
 export function isBridgePose(C) {
-  // hip = the APEX (face-up arch): well above shoulders AND ankles. A plank's hip sits ON the line.
-  return C.hip[1] < C.sho[1] - 0.03 && C.hip[1] < C.ank[1] - 0.10 && C.wri[1] > C.sho[1];
+  // hip = the APEX (face-up arch): well above shoulders AND ankles. A plank's hip sits ON
+  // the line, and a deep PIKE FOLD puts shoulders below hips too — so also require the
+  // hands roughly UNDER the shoulders (a pike reaches forward toward the feet). [corpus fix]
+  return C.hip[1] < C.sho[1] - 0.03 && C.hip[1] < C.ank[1] - 0.10 && C.wri[1] > C.sho[1]
+      && Math.abs(C.wri[0] - C.sho[0]) < 0.15
+      && angleAt(C.hip, C.kne, C.ank) < 150;   // bent knees: the 2D discriminator vs a standing fold [corpus]
 }
 export function isPikePose(C) {
-  return angleAt(C.sho, C.hip, C.ank) < 70 && Math.abs(C.ank[1]-C.hip[1]) < 0.10 && Math.abs(C.ank[0]-C.hip[0]) > 0.15;
+  const fold = angleAt(C.sho, C.hip, C.ank);
+  const seated = Math.abs(C.ank[1]-C.hip[1]) < 0.14 && Math.abs(C.ank[0]-C.hip[0]) > 0.15;
+  // standing forward fold: ankles well below hips, legs STRAIGHT, hands hanging below shoulders
+  const standing = (C.ank[1]-C.hip[1]) > 0.15 && angleAt(C.hip, C.kne, C.ank) > 150 && C.wri[1] > C.sho[1] - 0.02;
+  return fold < 95 && (seated || standing);   // corpus: the library's pikes are STANDING folds
 }
 export function isLsitPose(C) {
   const legAngleAbs = Math.abs(Math.atan2(C.hip[1]-C.ank[1], Math.abs(C.ank[0]-C.hip[0])) * 180 / Math.PI);

@@ -61,9 +61,11 @@ class CoachEngine {
     const inv = isInverted(C.wri, C.sho, C.hip, C.ank);
     const lever = !inv && isFrontLeverPose(C);
     const hang = !inv && !lever && isHanging(C.wri, C.sho, C.hip);
-    const bridge = !inv && !lever && !hang && isBridgePose(C);
-    let pikeP = !inv && !lever && !hang && !bridge && isPikePose(C);
-    let lsitP = !inv && !lever && !hang && !bridge && !pikeP && isLsitPose(C);
+    const lsitEarly = !inv && !lever && !hang && isLsitPose(C);
+    const pikeEarly = !inv && !lever && !hang && !lsitEarly && isPikePose(C);
+    const bridge = !inv && !lever && !hang && !lsitEarly && !pikeEarly && isBridgePose(C);
+    let pikeP = pikeEarly;
+    let lsitP = lsitEarly;
     let horiz = !inv && !lever && !hang && !bridge && !pikeP && !lsitP && Math.abs(C.sho[1] - C.ank[1]) < HORIZ_BAND && C.wri[1] > C.sho[1] - 0.05;
     let standing = !inv && !lever && !hang && !bridge && !horiz && !pikeP && !lsitP;
     let invA = inv, leverA = lever, hangA = hang, bridgeA = bridge;
