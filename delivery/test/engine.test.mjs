@@ -243,5 +243,15 @@ holdScenario("bridge", BRIDGE, "bridge", 85, 100);
   check("lock scores + unlock restores auto", types.join(",") === "handstand,squats", JSON.stringify(types));
 }
 
+
+// ---- corpus regression: leave the frame mid-handstand -> hold must still log ----
+{
+  const e = new CoachEngine(); let t = 0;
+  for (let i = 0; i < 150; i++) e.feed(HS, t += 33);         // 5 s inverted
+  for (let i = 0; i < 60; i++) e.feed(null, t += 33);         // athlete gone / video ends
+  check("handstand logs when athlete leaves frame", e.session.length === 1
+    && e.session[0].type === "handstand" && e.session[0].secs > 3, JSON.stringify(e.session));
+}
+
 console.log(`\nTOTAL: ${pass}/${pass + fail} engine checks pass`);
 process.exit(fail ? 1 : 0);

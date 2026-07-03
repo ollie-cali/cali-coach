@@ -237,6 +237,14 @@ export class CoachEngine {
     this.pl.counter = new PullupCounter();
   }
   private tickIdle(now: number, mode: "READY" | "IN FRAME"): CoachFrameOut {
+    // close an active handstand too — the athlete may leave the frame (or the video may
+    // end) while still inverted; every other hold closed here but this one. [corpus bug]
+    if (this.hs.active && now - this.hs.lastInv > HOLD_END_MS) {
+      const secs = (this.hs.lastInv - this.hs.t0) / 1000;
+      if (secs > MIN_HOLD_S) this.log({ type: "handstand", secs: round1(secs),
+        avg: round1(this.hs.sum / Math.max(1, this.hs.n)), min: round1(this.hs.min), at: new Date().toISOString() });
+      this.hs.active = false; this.hs.pend = 0;
+    }
     for (const k of Object.keys(this.holds) as (keyof CoachEngine["holds"])[])
       this.holds[k].tick(now, e => this.log(e));
     if (this.pk.active && now - this.pk.lastHoriz > HOLD_END_MS) this.closePlank();
