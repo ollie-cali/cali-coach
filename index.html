@@ -45,9 +45,9 @@
   <video id="video" playsinline muted></video>
   <canvas id="canvas"></canvas>
   <div class="hud" id="topbar">
-    <span class="chip mode" id="mode">READY</span><span class="chip" id="timer" hidden>0.0s</span><span class="chip" id="reps" hidden>0 reps</span>
+    <span class="chip" id="recdot" hidden style="color:#f0564b">● REC</span>
   </div>
-  <div class="hud" id="scorewrap"><div id="score">--</div><div id="cue" hidden></div><div id="sub">auto-detects 9 moves: handstand · push-ups · squats · plank · pull-ups · front lever · L-sit · pike · bridge</div></div>
+  <div class="hud" id="scorewrap"><div id="sub">auto-detects 9 moves: handstand · push-ups · squats · plank · pull-ups · front lever · L-sit · pike · bridge</div></div>
   <div class="hud" id="bottombar">
     <button id="flip">Flip</button><button id="voice">🔊</button><button class="gold" id="sessionbtn">Session</button><button id="settings">⚙</button>
   </div>
@@ -149,8 +149,165 @@ const MODE_COL = { HANDSTAND: null, "PUSH-UP": "#58a6ff", PLANK: "#a371f7", SQUA
 function scoreCol(s) { return s >= 85 ? "#4cae6a" : s >= 65 ? "#e0a73a" : "#f0564b"; }
 let lastCue = "", lastCueAt = 0;
 function setCue(c) { const now = performance.now();
-  if (c && c !== lastCue && now - lastCueAt > 1200) { lastCue = c; lastCueAt = now; $("cue").textContent = c; }
-  $("cue").hidden = !c && !$("cue").textContent ? true : !c; }
+  if (c && c !== lastCue && now - lastCueAt > 1200) { lastCue = c; lastCueAt = now; }
+  if (!c) lastCue = ""; }
+
+// ---------- canvas HUD (burned into recordings: the score IS the watermark) ----------
+function paintHUD(out) {
+  const W = canvas.width, H = canvas.height, s = Math.min(W, H) / 720;
+  ctx.save();
+  ctx.textBaseline = "top";
+  ctx.font = `800 ${28*s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillStyle = "#ffffffd9"; ctx.fillText("CALI", 24*s, 22*s);
+  ctx.fillStyle = "#e0a73a"; ctx.fillText("COACH", 24*s + ctx.measureText("CALI ").width, 22*s);
+  const bits = [out.mode];
+  if (out.holdSecs != null) bits.push(out.holdSecs.toFixed(1) + "s");
+  if (out.reps != null) bits.push(out.reps + " reps");
+  ctx.font = `700 ${22*s}px -apple-system,system-ui,sans-serif`;
+  const label = bits.join("  ·  "), lw = ctx.measureText(label).width;
+  ctx.fillStyle = "#0d1014b8"; roundRect((W-lw)/2 - 16*s, 18*s, lw + 32*s, 40*s, 20*s); ctx.fill();
+  ctx.fillStyle = "#e9eef3"; ctx.fillText(label, (W-lw)/2, 26*s);
+  if (out.score != null) {
+    ctx.font = `800 ${110*s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillStyle = scoreCol(out.score);
+    ctx.shadowColor = "#000"; ctx.shadowBlur = 18*s;
+    ctx.fillText(String(Math.round(out.score)), 26*s, H - 150*s);
+    ctx.shadowBlur = 0;
+  }
+  if (lastCue) {
+    ctx.font = `700 ${24*s}px -apple-system,system-ui,sans-serif`;
+    const cw = ctx.measureText(lastCue).width;
+    ctx.fillStyle = "#0d1014b8"; roundRect(22*s, H - 58*s, cw + 28*s, 44*s, 12*s); ctx.fill();
+    ctx.fillStyle = "#e9eef3"; ctx.fillText(lastCue, 36*s, H - 48*s);
+  }
+  ctx.restore();
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r); ctx.closePath();
+}
+
+// ---------- confetti + PB banner ----------
+let particles = [], banner = null;
+function celebrate(text) {
+  banner = { text, until: performance.now() + 3200 };
+  const W = canvas.width, H = canvas.height;
+  const cols = ["#e0a73a", "#4cae6a", "#58a6ff", "#db61a2", "#f0564b", "#ffffff"];
+  for (let i = 0; i < 160; i++) particles.push({
+    x: W/2, y: H*0.42, vx: (Math.random()-0.5)*16, vy: -Math.random()*18 - 4,
+    c: cols[i % cols.length], r: 4 + Math.random()*6, rot: Math.random()*6.3, vr: (Math.random()-0.5)*0.4 });
+  say(text, true);
+}
+function paintParty(now) {
+  const H = canvas.height, s = Math.min(canvas.width, H) / 720;
+  particles = particles.filter(pt => pt.y < H + 30);
+  for (const pt of particles) {
+    pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.5; pt.rot += pt.vr;
+    ctx.save(); ctx.translate(pt.x, pt.y); ctx.rotate(pt.rot);
+    ctx.fillStyle = pt.c; ctx.fillRect(-pt.r/2, -pt.r/2, pt.r, pt.r*1.6); ctx.restore();
+  }
+  if (banner && now < banner.until) {
+    ctx.save();
+    ctx.font = `800 ${52*s}px -apple-system,system-ui,sans-serif`;
+    const w = ctx.measureText(banner.text).width;
+    ctx.fillStyle = "#0d1014d9"; roundRect((canvas.width-w)/2 - 28*s, canvas.height*0.30, w + 56*s, 84*s, 20*s); ctx.fill();
+    ctx.fillStyle = "#e0a73a"; ctx.textBaseline = "top";
+    ctx.fillText(banner.text, (canvas.width-w)/2, canvas.height*0.30 + 16*s);
+    ctx.restore();
+  } else if (banner && now >= banner.until) banner = null;
+}
+
+// ---------- personal bests ----------
+const pbs = JSON.parse(localStorage.getItem("caliPBs") || "{}");
+function checkPB(e) {
+  const k = e.type, prev = pbs[k] || { secs: 0, avg: 0 };
+  let msg = null;
+  if ("secs" in e && e.secs > prev.secs) msg = `NEW PB — ${e.secs}s ${k.replace("_", " ")}`;
+  else if (e.avg > prev.avg + 0.5) msg = `NEW BEST FORM — ${Math.round(e.avg)}`;
+  if (msg) {
+    pbs[k] = { secs: Math.max(prev.secs, e.secs ?? 0), avg: Math.max(prev.avg, e.avg) };
+    localStorage.setItem("caliPBs", JSON.stringify(pbs));
+    celebrate(msg); e.pb = true;
+  }
+}
+
+// ---------- auto-record: activity start -> record; end + 2 s -> stop ----------
+const MIME = ["video/mp4", "video/webm;codecs=vp9", "video/webm"].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+let rec = null, recChunks = [], recStopTimer = 0, canvasStream = null, wasActive = false;
+const ACTIVE = new Set(["HANDSTAND", "PUSH-UP", "PLANK", "SQUAT", "PULL-UP", "FRONT LEVER", "L-SIT", "PIKE", "BRIDGE"]);
+function recStart() {
+  if (!MIME || rec) return;
+  canvasStream ||= canvas.captureStream(30);
+  recChunks = [];
+  rec = new MediaRecorder(canvasStream, { mimeType: MIME, videoBitsPerSecond: 6_000_000 });
+  rec.ondataavailable = ev => { if (ev.data.size) recChunks.push(ev.data); };
+  rec.start(1000);
+  $("recdot").hidden = false;
+}
+function recStop(attachTo) {
+  if (!rec) return;
+  const r = rec; rec = null; $("recdot").hidden = true;
+  r.onstop = () => {
+    if (recChunks.length && attachTo) {
+      attachTo.clip = URL.createObjectURL(new Blob(recChunks, { type: MIME }));
+      attachTo.clipExt = MIME.startsWith("video/mp4") ? "mp4" : "webm";
+    }
+    recChunks = [];
+  };
+  r.stop();
+}
+function recTick(out) {
+  const active = ACTIVE.has(out.mode);
+  if (active && !wasActive) { clearTimeout(recStopTimer); recStopTimer = 0; recStart(); }
+  if (!active && wasActive && rec && !recStopTimer)
+    recStopTimer = setTimeout(() => { recStopTimer = 0; recStop(session[session.length - 1]); }, 2000);
+  wasActive = active;
+}
+
+// ---------- share: clips + branded 1080x1920 card ----------
+async function shareFile(file, text) {
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], text }); return; } catch {}
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+}
+async function doShareClip(e) {
+  const blob = await (await fetch(e.clip)).blob();
+  shareFile(new File([blob], `cali-${e.type}.${e.clipExt}`, { type: blob.type }),
+            `${e.type.replace("_", " ")} — score ${Math.round(e.avg)} on Cali Coach`);
+}
+function doShareCard(e) {
+  const c = document.createElement("canvas"); c.width = 1080; c.height = 1920;
+  const x = c.getContext("2d");
+  const g = x.createLinearGradient(0, 0, 0, 1920);
+  g.addColorStop(0, "#11161d"); g.addColorStop(1, "#0d1014");
+  x.fillStyle = g; x.fillRect(0, 0, 1080, 1920);
+  x.textAlign = "center"; x.textBaseline = "top";
+  x.font = "800 72px -apple-system,system-ui,sans-serif";
+  x.fillStyle = "#e9eef3"; x.fillText("CALI COACH", 540, 200);
+  const names = { handstand: "HANDSTAND", plank: "PLANK", front_lever: "FRONT LEVER", lsit: "L-SIT",
+                  pike: "PIKE FOLD", bridge: "BRIDGE", pushups: "PUSH-UPS", squats: "SQUATS", pullups: "PULL-UPS" };
+  x.font = "700 58px -apple-system,system-ui,sans-serif"; x.fillStyle = "#9aa4ad";
+  x.fillText(names[e.type] || e.type, 540, 360);
+  x.beginPath(); x.arc(540, 830, 300, -Math.PI/2, -Math.PI/2 + (e.avg/100)*Math.PI*2);
+  x.lineWidth = 40; x.strokeStyle = "#e0a73a"; x.lineCap = "round"; x.stroke();
+  x.beginPath(); x.arc(540, 830, 300, 0, Math.PI*2); x.lineWidth = 6; x.strokeStyle = "#2a313a"; x.stroke();
+  x.font = "800 240px -apple-system,system-ui,sans-serif"; x.fillStyle = "#e0a73a";
+  x.textBaseline = "middle"; x.fillText(String(Math.round(e.avg)), 540, 830);
+  x.textBaseline = "top"; x.font = "700 64px -apple-system,system-ui,sans-serif"; x.fillStyle = "#e9eef3";
+  const sub = "secs" in e ? `${e.secs}s hold` : `${e.reps} reps`;
+  x.fillText(sub + (e.pb ? "  ·  NEW PB" : ""), 540, 1230);
+  x.font = "500 44px -apple-system,system-ui,sans-serif"; x.fillStyle = "#9aa4ad";
+  x.fillText(new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long" }), 540, 1340);
+  x.fillStyle = "#e0a73a"; x.font = "700 46px -apple-system,system-ui,sans-serif";
+  x.fillText("caliunity.com", 540, 1720);
+  c.toBlob(b => shareFile(new File([b], `cali-${e.type}.png`, { type: "image/png" }),
+                          `${names[e.type]} on Cali Coach`), "image/png");
+}
+window.shareClip = i => doShareClip(session[i]);
+window.shareCard = i => doShareCard(session[i]);
 
 function loop() {
   requestAnimationFrame(loop);
@@ -162,23 +319,20 @@ function loop() {
   const lm = res.landmarks?.[0] ?? null;
 
   const out = engine.feed(lm, performance.now());                       // THE tested brain
-  $("mode").textContent = out.mode;
-  $("timer").hidden = out.holdSecs == null;
-  if (out.holdSecs != null) $("timer").textContent = out.holdSecs.toFixed(1) + "s";
-  $("reps").hidden = out.reps == null;
-  if (out.reps != null) $("reps").textContent = out.reps + " reps";
-  if (out.score != null) { $("score").textContent = Math.round(out.score); $("score").style.color = scoreCol(out.score); }
-  else $("score").textContent = "--";
   setCue(out.cue);
   if (out.cue) say(out.cue);
   if (lm) draw(lm, out.mode === "HANDSTAND" ? scoreCol(out.score ?? 50) : (MODE_COL[out.mode] || "#9aa4ad"));
   if (lm && out.mode === "HANDSTAND") ghostLine(lm);
+  paintHUD(out);
+  paintParty(performance.now());
   ctx.restore();
-  // announce logged results as they land
+  recTick(out);
+  // logged results: PB check + announce
   if (session.length > announced) {
     const e = session[session.length - 1]; announced = session.length;
-    if ("secs" in e) say(`${e.secs} seconds, score ${Math.round(e.avg)}`, true);
-    else say(`${e.reps} reps, average ${Math.round(e.avg)}`, true);
+    checkPB(e);
+    if (!e.pb) { if ("secs" in e) say(`${e.secs} seconds, score ${Math.round(e.avg)}`, true);
+                 else say(`${e.reps} reps, average ${Math.round(e.avg)}`, true); }
   }
 }
 
@@ -187,13 +341,18 @@ $("sessionbtn").onclick = () => { renderSession(); $("panel").classList.add("ope
 $("settings").onclick = () => { renderSettings(); $("panel").classList.add("open"); };
 $("closepanel").onclick = () => $("panel").classList.remove("open");
 
-const fmt = e => {
+const fmt = (e, i) => {
   const at = e.at.includes("T") ? e.at.slice(11, 19) : e.at;
-  if (e.type === "handstand") return `<div class="item"><b>Handstand</b> · ${e.secs}s · alignment avg <b>${e.avg}</b> (min ${e.min}) · ${at}</div>`;
-  const holdNames = { plank: "Plank", front_lever: "Front lever", lsit: "L-sit", pike: "Pike fold", bridge: "Bridge" };
-  if (holdNames[e.type]) return `<div class="item"><b>${holdNames[e.type]}</b> · ${e.secs}s · score <b>${e.avg}</b> · ${at}</div>`;
-  const name = { pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups" }[e.type];
-  return `<div class="item"><b>${name}</b> · ${e.reps} reps · avg <b>${e.avg}</b> · [${e.scores.join(", ")}] · ${at}</div>`;
+  const names = { handstand: "Handstand", plank: "Plank", front_lever: "Front lever", lsit: "L-sit",
+                  pike: "Pike fold", bridge: "Bridge", pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups" };
+  const pb = e.pb ? ' <span style="color:#e0a73a">★ PB</span>' : "";
+  const stats = "secs" in e
+    ? `${e.secs}s · score <b>${e.avg}</b>${e.min != null ? ` (min ${e.min})` : ""}`
+    : `${e.reps} reps · avg <b>${e.avg}</b> · [${e.scores.join(", ")}]`;
+  const share = `<div style="display:flex;gap:8px;margin-top:6px">` +
+    (e.clip ? `<button class="sec" style="width:auto;padding:8px 14px;font-size:13px" onclick="shareClip(${i})">🎬 Share clip</button>` : "") +
+    `<button class="sec" style="width:auto;padding:8px 14px;font-size:13px" onclick="shareCard(${i})">🖼 Share card</button></div>`;
+  return `<div class="item"><b>${names[e.type] || e.type}</b>${pb} · ${stats} · ${at}${share}</div>`;
 };
 function renderSession() {
   $("paneltitle").textContent = "Session";
@@ -201,7 +360,7 @@ function renderSession() {
   $("coachbtn").hidden = session.length === 0;
   $("panelbody").innerHTML = session.length === 0
     ? '<div class="item">Nothing yet. Handstand, push-ups, squats, plank or pull-ups — it auto-detects.</div>'
-    : session.map(fmt).join("");
+    : session.map((e, i) => fmt(e, i)).join("");
 }
 function renderSettings() {
   $("paneltitle").textContent = "Settings";
