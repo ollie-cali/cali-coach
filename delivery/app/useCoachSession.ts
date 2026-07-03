@@ -74,12 +74,16 @@ export class CoachEngine {
     const inv = isInverted(C.wri, C.sho, C.hip, C.ank);
     const lever = !inv && isFrontLeverPose(C);
     const hang = !inv && !lever && isHanging(C.wri, C.sho, C.hip);
-    const bridge = !inv && !lever && !hang && isBridgePose(C);
+    // L-sit BEFORE pike (both fold ~90 deg; the L-sit's torso is VERTICAL, which its
+    // predicate demands, so it must get first claim) — then pike before bridge. [corpus]
+    const lsitEarly = !inv && !lever && !hang && isLsitPose(C);
+    const pikeEarly = !inv && !lever && !hang && !lsitEarly && isPikePose(C);
+    const bridge = !inv && !lever && !hang && !lsitEarly && !pikeEarly && isBridgePose(C);
     // pike/L-sit BEFORE the horizontal band: their horizontal legs + low torso fit
     // inside HORIZ_BAND, so plank would greedily capture them. A true plank fails
     // both predicates (fold ~175 deg; torso lean ~90 deg), so this order is safe.
-    let pikeP = !inv && !lever && !hang && !bridge && isPikePose(C);
-    let lsitP = !inv && !lever && !hang && !bridge && !pikeP && isLsitPose(C);
+    let pikeP = pikeEarly;
+    let lsitP = lsitEarly;
     let horiz = !inv && !lever && !hang && !bridge && !pikeP && !lsitP
       && Math.abs(C.sho[1] - C.ank[1]) < HORIZ_BAND && C.wri[1] > C.sho[1] - 0.05;
     let standing = !inv && !lever && !hang && !bridge && !horiz && !pikeP && !lsitP;
