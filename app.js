@@ -166,6 +166,9 @@ function paintHUD(out, guide) {
   ctx.fillStyle = "#e0a73a"; ctx.fillText("COACH", 24 * s + ctx.measureText("CALI ").width, 22 * s);
   ctx.font = `700 ${13 * s}px -apple-system,system-ui,sans-serif`;
   ctx.fillStyle = "#4cae6a"; ctx.fillText("✓ VERIFIED · scored live on-device", 24 * s, 54 * s);
+  ctx.font = `700 ${14 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillStyle = dailyDoneToday() ? "#4cae6a" : "#e0a73a";
+  ctx.fillText(`☀ Daily: ${NAMES[dailyKind] || dailyKind}${dailyDoneToday() ? " ✓" : ""}`, 24 * s, 76 * s);
   const bits = [out.mode];
   if (out.holdSecs != null) bits.push(out.holdSecs.toFixed(1) + "s");
   if (out.reps != null) bits.push(out.reps + " reps");
@@ -360,6 +363,7 @@ function workoutTick(out, now) {
   if (!workout.steps || workout.done) return null;
   if (workout.resting) {
     const left = Math.ceil((workout.resting - now) / 1000);
+    if (left !== workout._lastLeft) { workout._lastLeft = left; if (left <= 3 && left > 0) beep(660 + (3 - left) * 110, 0.1); }
     if (left <= 0) { workout.resting = 0; workoutStep(); return null; }
     return `rest — ${left}s`;
   }
@@ -422,6 +426,76 @@ function downsample(arr, n) {
   return Array.from({ length: n }, (_, i) => arr[Math.floor(i * step)]);
 }
 
+// ================= ghost replay: race your own PB =================
+const GHOST_PTS = [11,12,13,14,15,16,23,24,25,26,27,28];
+const GHOST_SKEL = [[0,2],[2,4],[1,3],[3,5],[0,1],[0,6],[1,7],[6,7],[6,8],[8,10],[7,9],[9,11]];
+let ghostOn = JSON.parse(localStorage.getItem("caliGhost_on") ?? "true");
+let ghostRec = [], ghostStart = 0, ghostPlay = null, ghostBeaten = false, lastGhostSample = 0;
+const ghosts = JSON.parse(localStorage.getItem("caliGhosts") || "{}");
+const MODE_TO_KIND = { HANDSTAND: "handstand", PLANK: "plank", "FRONT LEVER": "front_lever",
+  "L-SIT": "lsit", PIKE: "pike", BRIDGE: "bridge" };
+
+function ghostTick(lm, out, now) {
+  const active = ACTIVE.has(out.mode);
+  if (active && !ghostStart) {
+    ghostStart = now; ghostRec = []; ghostBeaten = false;
+    const k = MODE_TO_KIND[out.mode];
+    ghostPlay = ghostOn && k && ghosts[k] ? ghosts[k] : null;
+    if (ghostPlay) say(`racing your best — ${ghostPlay.secs} seconds`, true);
+  }
+  if (!active && ghostStart) { ghostStart = 0; ghostPlay = null; }
+  if (active && lm && now - lastGhostSample > 120 && ghostRec.length < 500) {
+    lastGhostSample = now;
+    ghostRec.push([Math.round(now - ghostStart), GHOST_PTS.map(i => [
+      Math.round(lm[i].x * 1000) / 1000, Math.round(lm[i].y * 1000) / 1000])]);
+  }
+  if (active && ghostPlay) {
+    const el = now - ghostStart;
+    const fr = ghostPlay.frames;
+    let f = fr[fr.length - 1];
+    for (let i = 0; i < fr.length; i++) if (fr[i][0] >= el) { f = fr[i]; break; }
+    ctx.save(); ctx.globalAlpha = 0.35; ctx.strokeStyle = "#e0a73a"; ctx.lineWidth = 5; ctx.lineCap = "round";
+    for (const [a, b] of GHOST_SKEL) {
+      ctx.beginPath();
+      ctx.moveTo(f[1][a][0] * canvas.width, f[1][a][1] * canvas.height);
+      ctx.lineTo(f[1][b][0] * canvas.width, f[1][b][1] * canvas.height);
+      ctx.stroke();
+    }
+    ctx.restore();
+    if (!ghostBeaten && el > ghostPlay.secs * 1000) {
+      ghostBeaten = true;
+      toast = { text: "👻 GHOST BEATEN", until: now + 2000 };
+      say("you're past your best — keep going", true); sfx.milestone();
+    }
+  }
+}
+function ghostSave(e) {
+  const holdKinds = ["handstand", "plank", "front_lever", "lsit", "pike", "bridge"];
+  if (!holdKinds.includes(e.type) || !ghostRec.length) return;
+  const prev = ghosts[e.type];
+  if (!prev || e.secs > prev.secs) {
+    ghosts[e.type] = { secs: e.secs, avg: e.avg, frames: ghostRec.slice(0, 500) };
+    try { localStorage.setItem("caliGhosts", JSON.stringify(ghosts)); } catch {}
+  }
+  ghostRec = [];
+}
+
+// ================= daily move =================
+const KIND_ORDER = ["handstand", "pushups", "squats", "plank", "lsit", "pullups", "pike", "bridge", "front_lever"];
+const dailyKind = KIND_ORDER[Math.floor(Date.now() / 86400000) % KIND_ORDER.length];
+function dailyDoneToday() {
+  const today = new Date().toISOString().slice(0, 10);
+  return journal.some(j => j.type === dailyKind && j.at.slice(0, 10) === today);
+}
+function dailyTick(e) {
+  if (e.type === dailyKind && !e._dailyChecked) {
+    e._dailyChecked = true;
+    const today = new Date().toISOString().slice(0, 10);
+    const already = journal.filter(j => j.type === dailyKind && j.at.slice(0, 10) === today).length;
+    if (already <= 1) { e.daily = true; celebrate("DAILY MOVE ✓"); }
+  }
+}
+
 // ================= skeleton + ghost =================
 const SKEL = [[11,13],[13,15],[12,14],[14,16],[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
 function draw(lm, col) {
@@ -470,6 +544,7 @@ function loop() {
   if (lm) draw(lm, out.mode === "HANDSTAND" ? scoreCol(out.score ?? 50) : (MODE_COL[out.mode] || "#9aa4ad"));
   if (lm && out.mode === "HANDSTAND") ghostLine(lm);
   shotTick(lm, out, now);
+  ghostTick(lm, out, now);
   boardScoreTick(out, now);
   paintHUD(out, guide);
   paintDebug(lm, out);
@@ -482,7 +557,9 @@ function loop() {
     const prevReps = e.reps;
     if (bestShot) { e.shot = bestShot.url; e.angles = bestShot.angles; bestShot = null; }
     if (curTrace.length) { e.trace = downsample(curTrace, 120); curTrace = []; }
+    ghostSave(e);
     checkPB(e);
+    dailyTick(e);
     duelTick(e);
     journalAdd(e);
     if (!e.pb) { if ("secs" in e) say(`${e.secs} seconds, score ${Math.round(e.avg)}`, true);
@@ -519,7 +596,7 @@ $("closepanel").onclick = () => $("panel").classList.remove("open");
 
 const fmt = (e, i) => {
   const at = e.at.includes("T") ? e.at.slice(11, 19) : e.at;
-  const pb = e.pb ? ' <span style="color:#e0a73a">★ PB</span>' : "";
+  const pb = (e.pb ? ' <span style="color:#e0a73a">★ PB</span>' : "") + (e.daily ? ' <span style="color:#4cae6a">☀ DAILY</span>' : "");
   const player = e.player ? ` <span style="color:#58a6ff">[${e.player}]</span>` : "";
   const stats = "secs" in e && e.secs != null
     ? `${e.secs}s · score <b>${e.avg}</b>${e.min != null ? ` (min ${e.min})` : ""}${e.boardStability != null ? ` · base <b>${e.boardStability}</b>` : ""}`
@@ -580,6 +657,8 @@ function renderSettings() {
       <span style="color:var(--sub);font-size:13px"> live base-stability fuses with the camera score; the board glows your form colour</span></div>
     <div class="item">📺 Mirror to a screen — prop any phone/tablet on the board, open <b>mirror.html</b> on it, enter the code:
       <div id="mirrorrow" style="margin-top:8px"><button class="sec" id="mirrorbtn">Get mirror code</button></div></div>
+    <div class="item">👻 Ghost — race a translucent replay of your best hold
+      <button class="${ghostOn ? "gold" : "sec"}" style="margin-top:8px" id="ghosttoggle">${ghostOn ? "Ghost ON" : "Ghost OFF"}</button></div>
     <div class="item">🐞 Debug overlay — live posture flags + measured angles
       <button class="${debugOn ? "gold" : "sec"}" style="margin-top:8px" id="debugtoggle">${debugOn ? "Debug ON" : "Debug OFF"}</button></div>
     <div class="item">Anthropic API key (optional — unlocks the AI coach; stored only in this browser):
@@ -592,6 +671,7 @@ function renderSettings() {
     renderSettings(); };
   $("tilttoggle").onclick = () => { tiltOn = !tiltOn; localStorage.setItem("caliTilt", JSON.stringify(tiltOn)); renderSettings(); };
   $("debugtoggle").onclick = () => { debugOn = !debugOn; localStorage.setItem("caliDebug", JSON.stringify(debugOn)); renderSettings(); };
+  $("ghosttoggle").onclick = () => { ghostOn = !ghostOn; localStorage.setItem("caliGhost_on", JSON.stringify(ghostOn)); renderSettings(); };
   $("boardbtn").onclick = async () => { try { await boardConnect(); renderSettings(); } catch (e) { say("board connection failed", true); } };
   $("mirrorbtn").onclick = async () => {
     $("mirrorbtn").textContent = "starting…";

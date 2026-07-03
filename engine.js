@@ -17,13 +17,12 @@ import {
   SquatCounter,
   PullupCounter,
   angleAt,
-  pickSide,
   chain,
   EMA
 } from "./scorer.js";
 const VIS_GATE = 0.4, HORIZ_BAND = 0.28;
 const HOLD_START_MS = 500, HOLD_END_MS = 700, SET_END_MS = 3e3, MIN_HOLD_S = 1.5;
-const PLANK_ARM_MS = 2500, PLANK_STILL_ELBOW = 150;
+const PLANK_ARM_MS = 2500, PLANK_ELBOW_RANGE = 30;
 const round1 = (x) => Math.round(x * 10) / 10;
 class CoachEngine {
   session = [];
@@ -37,9 +36,21 @@ class CoachEngine {
   }
   scoreEMA = new EMA(0.25);
   hs = { active: false, t0: 0, sum: 0, n: 0, min: 100, lastInv: 0, pend: 0 };
-  pu = { counter: new RepCounter(), lastActive: 0, lastCue: null, lastScore: null };
-  pk = { active: false, t0: 0, devSum: 0, n: 0, horizSince: 0, moved: false, lastHoriz: 0 };
-  sq = { counter: new SquatCounter(), lastRepAt: 0 };
+  pu = { counter: new RepCounter(), lastActive: 0, lastCue: null, lastScore: null, lastRepAt: 0, lastCount: 0 };
+  pk = {
+    active: false,
+    t0: 0,
+    devSum: 0,
+    n: 0,
+    horizSince: 0,
+    moved: false,
+    lastHoriz: 0,
+    ring: []
+  };
+  // rolling (t, smoothed elbow) window
+  elbowEMA = new EMA(0.35);
+  // pose noise on occluded forearm-plank elbows fakes reps — smooth before counting [corpus]
+  sq = { counter: new SquatCounter(), lastRepAt: 0, lastHipX: null, lastHipT: 0 };
   pl = { counter: new PullupCounter(), lastHang: 0 };
   holds = {
     front_lever: new HoldTracker("front_lever"),
@@ -53,9 +64,19 @@ class CoachEngine {
     if (out.secs !== null) return { mode, score: out.score, cue: r.cue, holdSecs: out.secs, reps: null };
     return { mode, score: null, cue: null, holdSecs: null, reps: null };
   }
+  side = null;
+  pickSticky(lm) {
+    const L = [11, 13, 15, 23, 25, 27], R = [12, 14, 16, 24, 26, 28];
+    const vis = (idx) => idx.reduce((a, i) => a + (lm[i].visibility ?? 0), 0);
+    const l = vis(L), r = vis(R);
+    if (this.side === null) this.side = l >= r ? "L" : "R";
+    else if (this.side === "L" && r > l * 1.15) this.side = "R";
+    else if (this.side === "R" && l > r * 1.15) this.side = "L";
+    return this.side;
+  }
   feed(lm, now) {
     if (!lm) return this.tickIdle(now, "READY");
-    const C = chain(lm, pickSide(lm));
+    const C = chain(lm, this.pickSticky(lm));
     const visible = C.minVis > VIS_GATE;
     if (!visible) return this.tickIdle(now, "READY");
     const inv = isInverted(C.wri, C.sho, C.hip, C.ank);
@@ -145,22 +166,34 @@ class CoachEngine {
     if (horiz) {
       if (!this.pk.horizSince) {
         this.pk.horizSince = now;
-        this.pk.moved = false;
+        this.pk.ring = [];
+        this.elbowEMA.v = null;
       }
       this.pk.lastHoriz = now;
       this.pu.lastActive = now;
       const f = pushupFrame(C.sho, C.elb, C.wri, C.hip, C.ank);
-      if (this.locked !== "plank") this.pu.counter.feed(f.elbow, f.lineDev);
-      if (f.elbow < PLANK_STILL_ELBOW && this.locked !== "plank") this.pk.moved = true;
+      const elbowS = this.elbowEMA.feed(f.elbow);
+      if (this.locked !== "plank") this.pu.counter.feed(elbowS, f.lineDev);
+      this.pk.ring.push([now, elbowS]);
+      while (this.pk.ring.length && now - this.pk.ring[0][0] > PLANK_ARM_MS) this.pk.ring.shift();
+      const es = this.pk.ring.map((r) => r[1]);
+      const windowStill = this.pk.ring.length > 4 && now - this.pk.ring[0][0] > PLANK_ARM_MS * 0.8 && Math.max(...es) - Math.min(...es) < PLANK_ELBOW_RANGE;
+      this.pk.moved = !windowStill && this.locked !== "plank";
       const reps = this.pu.counter.reps;
-      if (reps.length) {
+      if (reps.length > this.pu.lastCount) {
+        this.pu.lastRepAt = now;
+        this.pu.lastCount = reps.length;
+      }
+      if (reps.length && windowStill && now - this.pu.lastRepAt >= SET_END_MS) {
+        this.closePushups();
+      } else if (reps.length) {
         if (this.pk.active) this.pk.active = false;
         const last = reps[reps.length - 1];
         this.pu.lastScore = last.score;
         this.pu.lastCue = last.cue;
         return { mode: "PUSH-UP", score: last.score, cue: last.cue, holdSecs: null, reps: reps.length };
       }
-      if (!this.pk.moved && now - this.pk.horizSince > PLANK_ARM_MS) {
+      if (!this.pk.moved) {
         if (!this.pk.active) {
           this.pk.active = true;
           this.pk.t0 = this.pk.horizSince;
@@ -183,6 +216,15 @@ class CoachEngine {
     if (this.pk.active && now - this.pk.lastHoriz > HOLD_END_MS) this.closePlank();
     if (this.pu.counter.reps.length && now - this.pu.lastActive > SET_END_MS) this.closePushups();
     if (standing) {
+      const hipX = C.hip[0];
+      const dt = this.sq.lastHipT ? now - this.sq.lastHipT : 0;
+      const speed = this.sq.lastHipX !== null && dt > 0 ? Math.abs(hipX - this.sq.lastHipX) / (dt / 1e3) : 0;
+      this.sq.lastHipX = hipX;
+      this.sq.lastHipT = now;
+      if (speed > 0.12) {
+        if (this.sq.counter.state !== "TOP") this.sq.counter.state = "TOP";
+        return this.tickIdle(now, "IN FRAME");
+      }
       const knee = angleAt(C.hip, C.kne, C.ank);
       const before = this.sq.counter.reps.length;
       this.sq.counter.feed(knee, torsoLean(C.sho, C.hip));
@@ -218,7 +260,8 @@ class CoachEngine {
     this.pu.counter = new RepCounter();
     this.pu.lastScore = null;
     this.pu.lastCue = null;
-    this.pk.horizSince = 0;
+    this.pu.lastCount = 0;
+    this.pu.lastRepAt = 0;
   }
   closePlank() {
     const secs = (this.pk.lastHoriz - this.pk.t0) / 1e3;
