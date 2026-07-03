@@ -215,3 +215,69 @@ export function isHanging(wri: Pt, sho: Pt, hip: Pt): boolean {
   return wri[1] < sho[1] && sho[1] < hip[1];       // wrists above shoulders above hips
 }
 export function torsoLean(sho: Pt, hip: Pt): number { return leanFromVertical(hip, sho); }
+
+// ---------------- SKILL + MOBILITY HOLDS ----------------
+export function frontLeverScore(sho: Pt, hip: Pt, kne: Pt, ank: Pt) {
+  const hipA = angleAt(sho, hip, kne);
+  const kneA = angleAt(hip, kne, ank);
+  const horiz = Math.atan2(Math.abs(ank[1]-sho[1]), Math.abs(ank[0]-sho[0])) * 180 / Math.PI;
+  const score = Math.max(0, Math.min(100, 100 - 1.2*(180-hipA) - 1.0*horiz - 0.4*(180-kneA)));
+  const faults: [number, string][] = [
+    [(180-hipA)*1.2, "kill the pike — open your hips"],
+    [horiz*1.0, "lift — you're dropping off horizontal"],
+    [(180-kneA)*0.4, "squeeze your legs straight"],
+  ].sort((a, b) => b[0]-a[0]);
+  return { score, hip: hipA, horiz, knee: kneA, cue: score >= 90 ? "textbook lever — hold" : faults[0][1] };
+}
+
+export function lsitScore(hip: Pt, kne: Pt, ank: Pt) {
+  const legAngle = Math.atan2(hip[1]-ank[1], Math.abs(ank[0]-hip[0])) * 180 / Math.PI;
+  const kneA = angleAt(hip, kne, ank);
+  const score = Math.max(0, Math.min(100, 85 + 1.5*legAngle - 0.4*(180-kneA)));
+  let cue: string;
+  if ((180-kneA) > 25) cue = "straighten your knees";
+  else if (legAngle < -8) cue = "lift your legs — toes above hip height";
+  else if (score >= 95) cue = "that's a V — outstanding";
+  else cue = "strong L — press the floor away";
+  return { score, legAngle, knee: kneA, cue };
+}
+
+export function pikeScore(sho: Pt, hip: Pt, kne: Pt, ank: Pt) {
+  const fold = angleAt(sho, hip, ank);
+  const kneA = angleAt(hip, kne, ank);
+  const base = Math.max(0, Math.min(100, (90 - fold) / 55 * 100));
+  const score = Math.max(0, base - 1.0*(180-kneA));
+  let cue: string;
+  if ((180-kneA) > 15) cue = "knees locked — a bent-knee fold doesn't count";
+  else if (score >= 85) cue = "beautiful fold — breathe and sink";
+  else cue = "hinge deeper — chest to thighs";
+  return { score, fold, knee: kneA, cue };
+}
+
+export function bridgeScore(wri: Pt, sho: Pt, hip: Pt, kne: Pt) {
+  const shoA = angleAt(wri, sho, hip);
+  const hipA = angleAt(sho, hip, kne);
+  const score = Math.max(0, Math.min(100, 100 - 1.2*(180-shoA) - 0.6*(180-hipA)));
+  const faults: [number, string][] = [
+    [(180-shoA)*1.2, "push your chest over your hands — open the shoulders"],
+    [(180-hipA)*0.6, "drive your hips higher"],
+  ].sort((a, b) => b[0]-a[0]);
+  return { score, shoulder: shoA, hip: hipA, cue: score >= 88 ? "elite arch" : faults[0][1] };
+}
+
+// posture predicates on a chain C (shared by app + engine so detection can't drift)
+export function isFrontLeverPose(C: Chain): boolean {
+  return C.wri[1] < C.sho[1] - 0.04 && Math.abs(C.sho[1]-C.ank[1]) < 0.15 && Math.abs(C.sho[0]-C.ank[0]) > 0.15;
+}
+export function isBridgePose(C: Chain): boolean {
+  // hip = the APEX (face-up arch): well above shoulders AND ankles. A plank's hip sits ON the line.
+  return C.hip[1] < C.sho[1] - 0.03 && C.hip[1] < C.ank[1] - 0.10 && C.wri[1] > C.sho[1];
+}
+export function isPikePose(C: Chain): boolean {
+  return angleAt(C.sho, C.hip, C.ank) < 70 && Math.abs(C.ank[1]-C.hip[1]) < 0.10 && Math.abs(C.ank[0]-C.hip[0]) > 0.15;
+}
+export function isLsitPose(C: Chain): boolean {
+  const legAngleAbs = Math.abs(Math.atan2(C.hip[1]-C.ank[1], Math.abs(C.ank[0]-C.hip[0])) * 180 / Math.PI);
+  return torsoLean(C.sho, C.hip) < 25 && C.wri[1] > C.sho[1] && legAngleAbs < 25
+      && Math.abs(C.ank[0]-C.hip[0]) > 0.12 && C.ank[1] < C.hip[1] + 0.08;
+}

@@ -4,7 +4,7 @@
 create table if not exists public.coach_sessions (
   id          uuid primary key default gen_random_uuid(),
   member_id   uuid not null references public.profiles(id) on delete cascade,
-  kind        text not null check (kind in ('handstand','pushups','lsit','plank')),
+  kind        text not null check (kind in ('handstand','pushups','squats','pullups','plank','front_lever','lsit','pike','bridge')),
   -- handstand: secs + alignment; sets: reps + per-rep scores
   secs        numeric,                       -- hold duration (holds)
   avg_score   numeric not null,              -- 0-100
