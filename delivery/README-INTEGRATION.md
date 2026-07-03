@@ -13,10 +13,10 @@
 
 ## Build order (fastest value first)
 
-1. **Today — WebView tier:** `app/CoachWebViewScreen.tsx` → a nav entry "Coach (beta)". Zero native work; the demo page runs entirely on-device. Add the postMessage bridge later so even this tier writes `coach_sessions`.
-2. **Backend:** apply `supabase/migration_coach_sessions.sql` (adjust to house conventions), deploy `supabase/functions_coach-summary_index.ts` as `coach-summary`, set `ANTHROPIC_API_KEY` secret. Then the web demo's paste-a-key field can die.
-3. **Native tier:** pick a pose plugin (A/B/C options in `CoachCameraScreen.tsx`), feed 33 MediaPipe-order landmarks into `CoachEngine.feed(lm, now)` — everything downstream is done and tested. Wire `engine.onLog` → `coach_sessions` insert (snippet in `useCoachSession.ts`).
-4. **Skill Swirl hook:** the `coach_best` view gives camera-verified evidence per member/kind → gate level unlocks on it (e.g. handstand ≥15 s at avg ≥80). **This makes belt/colour unlocks self-refereeing** — ties directly into `colour_tiers` + `member_unlocked_colours()`.
+1. **Today — WebView tier:** `app/CoachWebViewScreen.tsx` → a nav entry "Coach (beta)". Zero native work; the demo page runs entirely on-device. Add the postMessage bridge later so even this tier writes `coach_form_sessions`.
+2. **Backend:** apply `supabase/migration_coach_form_sessions.sql` (adjust to house conventions), deploy `supabase/functions_coach-summary_index.ts` as `coach-summary`, set `ANTHROPIC_API_KEY` secret. Then the web demo's paste-a-key field can die.
+3. **Native tier:** pick a pose plugin (A/B/C options in `CoachCameraScreen.tsx`), feed 33 MediaPipe-order landmarks into `CoachEngine.feed(lm, now)` — everything downstream is done and tested. Wire `engine.onLog` → `coach_form_sessions` insert (snippet in `useCoachSession.ts`).
+4. **Skill Swirl hook:** the `coach_form_best` view gives camera-verified evidence per member/kind → gate level unlocks on it (e.g. handstand ≥15 s at avg ≥80). **This makes belt/colour unlocks self-refereeing** — ties directly into `colour_tiers` + `member_unlocked_colours()`.
 5. **Board fusion:** `useCaliBoard.ts` — merge board holdEnd with camera holds (±2 s) → `source='fused'` rows. The board's record button already commands the phone to film.
 
 ## The one-line pitch to keep everyone honest

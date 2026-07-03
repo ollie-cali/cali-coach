@@ -275,7 +275,7 @@ class HoldTracker {
 }
 
 /* Supabase wiring:
-   engine.onLog = async (e) => supabase.from("coach_sessions").insert({
+   engine.onLog = async (e) => supabase.from("coach_form_sessions").insert({
      member_id: user.id,
      kind: e.type === "handstand" ? "handstand" : e.type,
      secs: "secs" in e ? e.secs : null,
