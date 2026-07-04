@@ -38,6 +38,31 @@ export function handstandScore(wri, sho, hip, kne, ank) {
   return { score, shoulder: shoA, hip: hipA, knee: kneA, lean, cue };
 }
 
+// STRADDLE handstand: legs are deliberately apart, so ignore leg/knee straightness
+// and score only the shoulders + the stack (hips over wrists). Same weights.
+export function straddleHandstandScore(wri, sho, hip, kne, ank) {
+  const shoA = angleAt(wri, sho, hip);
+  const lean = leanFromVertical(wri, hip);
+  const dSho = 180 - shoA;
+  let score = 100 - W_SHO * dSho - W_LEAN * lean;
+  score = Math.max(0, Math.min(100, score));
+  const faults = [
+    [dSho * W_SHO, "open your shoulders"],
+    [lean * W_LEAN, "stack hips over your wrists"],
+  ].sort((a, b) => b[0] - a[0]);
+  const cue = score >= 90 ? "clean straddle — hold it" : faults[0][1];
+  return { score, shoulder: shoA, lean, cue };
+}
+
+// STACK handstand: the strict, stack-focused variant. Takes the full handstand score
+// and adds an extra penalty on the lean, so the cue drives you to stack tight.
+export function stackHandstandScore(wri, sho, hip, kne, ank) {
+  const r = handstandScore(wri, sho, hip, kne, ank);
+  const score = Math.max(0, Math.min(100, r.score - 0.8 * r.lean));
+  const cue = score >= 92 ? "stacked and locked" : (r.lean > 6 ? "stack tighter over your wrists" : r.cue);
+  return { ...r, score, cue };
+}
+
 export function isInverted(wri, sho, hip, ank) {
   return wri[1] > hip[1] && ank[1] < sho[1];       // y down: wrists low, ankles high
 }

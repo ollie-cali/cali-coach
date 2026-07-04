@@ -41,6 +41,25 @@
   #splash h1{font-size:34px;margin:0}#splash h1 b{color:var(--gold)}
   #splash p{color:var(--sub);max-width:300px;text-align:center;margin:0;font-size:14px}
   .pulse{animation:p 1.4s infinite}@keyframes p{50%{opacity:.4}}
+  /* ---- after-action report (skill debrief / instant replay) ---- */
+  #aar{position:fixed;inset:0;z-index:8;background:#080a0dee;backdrop-filter:blur(6px);
+    display:none;flex-direction:column;align-items:center;justify-content:center;gap:11px;
+    padding:calc(env(safe-area-inset-top,0px) + 20px) 16px calc(env(safe-area-inset-bottom,0px) + 16px)}
+  @media (max-height:760px){#aar{justify-content:flex-start}#aarcanvas{height:38vh}}
+  #aar.show{display:flex}
+  #aar .kh{display:flex;justify-content:space-between;align-items:baseline;width:100%;max-width:420px}
+  #aar .kh b{font-size:22px;letter-spacing:.02em}#aar .kh b span{color:var(--gold)}
+  #aar .kh .t{color:var(--sub);font-size:13px;font-weight:700}
+  #aarcanvas{width:100%;max-width:420px;height:42vh;flex:none;background:#0d1014;border:1px solid #222a33;border-radius:16px}
+  #aar .rep{position:absolute;top:calc(env(safe-area-inset-top,0px) + 58px);color:var(--sub);font-size:11px;letter-spacing:.16em;text-transform:uppercase}
+  #aar .scores{display:flex;gap:10px;width:100%;max-width:420px}
+  #aar .scores div{flex:1;background:#12161d;border:1px solid #222a33;border-radius:12px;padding:10px 8px;text-align:center}
+  #aar .scores b{display:block;font-size:26px;font-weight:800;color:var(--gold);line-height:1}
+  #aar .scores small{color:var(--sub);font-size:11px}
+  #aar .cues{width:100%;max-width:420px;display:flex;flex-direction:column;gap:7px}
+  #aar .cue{background:#12161d;border-left:3px solid var(--gold);border-radius:8px;padding:9px 12px;font-size:14px;font-weight:600}
+  #aar .cue.good{border-left-color:var(--grn)}
+  #aar button{width:100%;max-width:420px}
 </style></head><body>
 <div id="stage">
   <video id="video" playsinline muted></video>
@@ -60,6 +79,18 @@
   <div style="display:flex;gap:10px;margin-top:12px">
     <button class="gold" id="coachbtn" hidden>Ask the Cali coach</button><button id="closepanel">Close</button>
   </div>
+</div>
+<div id="aar">
+  <div class="kh"><b id="aar-kind">HANDSTAND</b><span class="t" id="aar-head">held 0.0s</span></div>
+  <span class="rep">▶ instant replay · slo-mo</span>
+  <canvas id="aarcanvas"></canvas>
+  <div class="scores">
+    <div><b id="aar-avg">0</b><small>avg form</small></div>
+    <div><b id="aar-peak">0</b><small>best moment</small></div>
+    <div><b id="aar-hold">0s</b><small>held</small></div>
+  </div>
+  <div class="cues" id="aar-cues"></div>
+  <button class="gold" id="aar-ack">Got it — next</button>
 </div>
 <div id="splash"><h1>CALI <b>COACH</b></h1>
   <p>Live form scoring across 9 movements, strength to mobility. All on-device — no video leaves your phone.</p>

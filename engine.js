@@ -1,5 +1,7 @@
 import {
   handstandScore,
+  straddleHandstandScore,
+  stackHandstandScore,
   isInverted,
   isHanging,
   pushupFrame,
@@ -21,6 +23,7 @@ import {
   EMA
 } from "./scorer.js";
 const VIS_GATE = 0.4, HORIZ_BAND = 0.28;
+const HAND_KINDS = new Set(["handstand", "stack_handstand", "straddle_handstand", "kickup"]);
 const HOLD_START_MS = 500, HOLD_END_MS = 700, SET_END_MS = 3e3, MIN_HOLD_S = 1.5;
 const PLANK_ARM_MS = 2500, PLANK_ELBOW_RANGE = 30;
 const round1 = (x) => Math.round(x * 10) / 10;
@@ -92,7 +95,7 @@ class CoachEngine {
     let invA = inv, leverA = lever, hangA = hang, bridgeA = bridge;
     if (this.locked) {
       const want = this.locked;
-      invA = want === "handstand" ? inv : false;
+      invA = HAND_KINDS.has(want) ? inv : false;
       leverA = want === "front_lever" ? lever : false;
       hangA = want === "pullups" ? hang : false;
       bridgeA = want === "bridge" ? bridge : false;
@@ -119,12 +122,17 @@ class CoachEngine {
     } else this.hs.pend = 0;
     if (this.hs.active) {
       if (invA) {
-        const r = handstandScore(C.wri, C.sho, C.hip, C.kne, C.ank);
+        const sc = this.locked === "straddle_handstand" ? straddleHandstandScore
+                 : this.locked === "stack_handstand" ? stackHandstandScore
+                 : handstandScore;
+        const r = sc(C.wri, C.sho, C.hip, C.kne, C.ank);
         const s = this.scoreEMA.feed(r.score);
         this.hs.sum += r.score;
         this.hs.n++;
         this.hs.min = Math.min(this.hs.min, r.score);
-        return { mode: "HANDSTAND", score: s, cue: r.cue, holdSecs: (now - this.hs.t0) / 1e3, reps: null };
+        // kick-up drill: celebrate the entry for the first ~1.2s, then coach the hold
+        const cue = (this.locked === "kickup" && (now - this.hs.t0) < 1200) ? "nice kick-up — now stack it" : r.cue;
+        return { mode: "HANDSTAND", score: s, cue, holdSecs: (now - this.hs.t0) / 1e3, reps: null };
       }
       if (now - this.hs.lastInv > HOLD_END_MS) {
         const secs = (this.hs.lastInv - this.hs.t0) / 1e3;

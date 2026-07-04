@@ -332,7 +332,9 @@ function levelLandmarks(lm) {
 }
 
 // ================= movement picker + workout runner =================
-const KINDS = { handstand: "Handstand", pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups",
+const KINDS = { handstand: "Handstand", stack_handstand: "Stack handstand",
+  straddle_handstand: "Straddle handstand", kickup: "Kick-up to handstand",
+  pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups",
   plank: "Plank", front_lever: "Front lever", lsit: "L-sit", pike: "Pike fold", bridge: "Bridge" };
 let locked = null;
 function setLock(kind) {
@@ -480,6 +482,65 @@ function ghostSave(e) {
   ghostRec = [];
 }
 
+// ================= after-action report (skill debrief + instant replay) =================
+// ghost joint order: 0 Lsho,1 Rsho,2 Lelb,3 Relb,4 Lwri,5 Rwri,6 Lhip,7 Rhip,8 Lkne,9 Rkne,10 Lank,11 Rank
+const HOLD_KINDS = ["handstand", "plank", "front_lever", "lsit", "pike", "bridge"];
+const AAR_SKEL = [[0,2],[2,4],[1,3],[3,5],[0,1],[0,6],[1,7],[6,7],[6,8],[8,10],[7,9],[9,11]];
+const acanvas = $("aarcanvas"), actx = acanvas.getContext("2d");
+let aar = null;
+function aarScore(p) { return handstandScore(p[4], p[0], p[6], p[8], p[10]); }   // left side
+function aarPointers(frames, kind) {
+  if (kind !== "handstand") return ["hold it longer and steadier next time"];
+  const tally = {};
+  for (const [, p] of frames) { const r = aarScore(p); if (r.score < 90) tally[r.cue] = (tally[r.cue] || 0) + 1; }
+  const top = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([c]) => c);
+  return top.length ? top : ["clean lines — just hold it longer"];
+}
+function showReport(e, frames) {
+  if (!HOLD_KINDS.includes(e.type) || !frames || frames.length < 3) return;
+  let peak = e.avg;
+  if (e.type === "handstand") { peak = 0; for (const [, p] of frames) peak = Math.max(peak, aarScore(p).score); }
+  $("aar-kind").innerHTML = e.type === "handstand" ? 'HAND<span>STAND</span>' : e.type.replace("_", " ").toUpperCase();
+  $("aar-head").textContent = `held ${e.secs}s`;
+  $("aar-avg").textContent = Math.round(e.avg);
+  $("aar-peak").textContent = Math.round(peak);
+  $("aar-hold").textContent = e.secs + "s";
+  const cuesEl = $("aar-cues"); cuesEl.innerHTML = "";
+  if (e.avg >= 88) { const d = document.createElement("div"); d.className = "cue good"; d.textContent = "strong attempt — that was well stacked"; cuesEl.appendChild(d); }
+  const pts = aarPointers(frames, e.type);
+  for (const c of pts) { const d = document.createElement("div"); d.className = "cue"; d.textContent = "→ " + c; cuesEl.appendChild(d); }
+  aar = { frames, kind: e.type, t0: performance.now(), dur: Math.max(1000, frames[frames.length - 1][0]) };
+  $("aar").classList.add("show");
+  say(`Held ${e.secs} seconds, form ${Math.round(e.avg)}. ${pts[0]}.`, true);
+  aarLoop();
+}
+function aarLoop() {
+  if (!aar) return; requestAnimationFrame(aarLoop);
+  const W = acanvas.width = acanvas.clientWidth * devicePixelRatio, H = acanvas.height = acanvas.clientHeight * devicePixelRatio;
+  if (!W || !H) return;
+  actx.fillStyle = "#0d1014"; actx.fillRect(0, 0, W, H);
+  const el = ((performance.now() - aar.t0) * 0.45) % (aar.dur + 600);   // 0.45x slo-mo, loop with a beat
+  let f = aar.frames[0]; for (const fr of aar.frames) { if (fr[0] >= el) { f = fr; break; } f = fr; }
+  const p = f[1];
+  let minx = 1, maxx = 0, miny = 1, maxy = 0;
+  for (const q of p) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
+  const pad = 0.16, sw = maxx - minx || 1, sh = maxy - miny || 1, sc = Math.min(W * (1 - pad * 2) / sw, H * (1 - pad * 2) / sh);
+  const ox = (W - sw * sc) / 2 - minx * sc, oy = (H - sh * sc) / 2 - miny * sc;
+  const X = q => q[0] * sc + ox, Y = q => q[1] * sc + oy;
+  const wr = p[4], hp = p[6], off = Math.abs(wr[0] - hp[0]);
+  actx.setLineDash([10, 8]); actx.lineWidth = 3; actx.strokeStyle = off < 0.05 ? "#4cae6a" : off < 0.11 ? "#d29922" : "#f0564b";
+  actx.beginPath(); actx.moveTo(X(wr), Y(wr)); actx.lineTo(X(wr), miny * sc + oy - H * 0.06); actx.stroke(); actx.setLineDash([]);
+  actx.strokeStyle = "#e9eef3"; actx.lineWidth = Math.max(3, W * 0.012); actx.lineCap = "round";
+  for (const [a, b] of AAR_SKEL) { actx.beginPath(); actx.moveTo(X(p[a]), Y(p[a])); actx.lineTo(X(p[b]), Y(p[b])); actx.stroke(); }
+  actx.fillStyle = "#e0a73a"; for (const q of p) { actx.beginPath(); actx.arc(X(q), Y(q), Math.max(4, W * 0.008), 0, 7); actx.fill(); }
+  if (aar.kind === "handstand") {
+    actx.fillStyle = "#e0a73acc"; actx.textAlign = "left";
+    actx.font = `800 ${W * 0.11}px -apple-system,system-ui,sans-serif`;
+    actx.fillText(Math.round(aarScore(p).score), W * 0.05, H * 0.13);
+  }
+}
+$("aar-ack").onclick = () => { aar = null; $("aar").classList.remove("show"); };
+
 // ================= daily move =================
 const KIND_ORDER = ["handstand", "pushups", "squats", "plank", "lsit", "pullups", "pike", "bridge", "front_lever"];
 const dailyKind = KIND_ORDER[Math.floor(Date.now() / 86400000) % KIND_ORDER.length];
@@ -511,12 +572,17 @@ function draw(lm, col) {
     ctx.beginPath(); ctx.arc(lm[i].x * canvas.width, lm[i].y * canvas.height, 6, 0, 7); ctx.fill();
   }
 }
+// live STACK line: the vertical from your wrists. Goes GREEN when your hips stack over
+// your wrists, amber when you drift, red on a banana. Feedback, not just a reference.
 function ghostLine(lm) {
-  const side = (lm[15].visibility ?? 0) >= (lm[16].visibility ?? 0) ? 15 : 16;
-  const x = lm[side].x * canvas.width;
+  const wSide = (lm[15].visibility ?? 0) >= (lm[16].visibility ?? 0) ? 15 : 16;
+  const hSide = wSide === 15 ? 23 : 24;
+  const off = Math.abs(lm[wSide].x - lm[hSide].x);        // hips-vs-wrists horizontal offset (0 = stacked)
+  const col = off < 0.05 ? "#4cae6a" : off < 0.11 ? "#d29922" : "#f0564b";
+  const x = lm[wSide].x * canvas.width;
   ctx.save();
-  ctx.setLineDash([14, 10]); ctx.lineWidth = 3; ctx.strokeStyle = "#e0a73a88";
-  ctx.beginPath(); ctx.moveTo(x, lm[side].y * canvas.height); ctx.lineTo(x, 0); ctx.stroke();
+  ctx.setLineDash([14, 10]); ctx.lineWidth = 3; ctx.globalAlpha = 0.85; ctx.strokeStyle = col;
+  ctx.beginPath(); ctx.moveTo(x, lm[wSide].y * canvas.height); ctx.lineTo(x, 0); ctx.stroke();
   ctx.restore();
 }
 
@@ -557,13 +623,15 @@ function loop() {
     const prevReps = e.reps;
     if (bestShot) { e.shot = bestShot.url; e.angles = bestShot.angles; bestShot = null; }
     if (curTrace.length) { e.trace = downsample(curTrace, 120); curTrace = []; }
+    const aarFrames = ghostRec.slice();       // capture the attempt's frames BEFORE ghostSave clears them
     ghostSave(e);
     checkPB(e);
     dailyTick(e);
     duelTick(e);
     journalAdd(e);
-    if (!e.pb) { if ("secs" in e) say(`${e.secs} seconds, score ${Math.round(e.avg)}`, true);
-                 else say(`${prevReps} reps, average ${Math.round(e.avg)}`, true); }
+    showReport(e, aarFrames);                 // skill debrief + instant replay (hold kinds only)
+    // voice: reps announced here; holds are spoken inside showReport
+    if (!e.pb && !HOLD_KINDS.includes(e.type)) say(`${prevReps} reps, average ${Math.round(e.avg)}`, true);
   }
   // rep tick sound
   if (out.reps != null && out.reps > (loop._reps ?? 0)) sfx.rep();
