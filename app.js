@@ -314,7 +314,7 @@ function recStop(attachTo) {
 }
 function recTick(out) {
   const active = ACTIVE.has(out.mode);
-  if (active && !wasActive) { clearTimeout(recStopTimer); recStopTimer = 0; recStart(); }
+  if (active && !wasActive) { clearTimeout(recStopTimer); recStopTimer = 0; recStart(); hideSaveBtn(); }
   if (!active && wasActive && rec && !recStopTimer)
     recStopTimer = setTimeout(() => { recStopTimer = 0; recStop(session[session.length - 1]); }, 2000);
   wasActive = active;
@@ -553,43 +553,73 @@ function aarLoop() {
 }
 $("aar-ack").onclick = () => { aar = null; $("aar").classList.remove("show"); };
 
-// ===== canvas review (draws the debrief ON the streamed canvas so the CaliHome TABLET sees it) =====
-let review = null; const REVIEW_MS = 8500;
+// ===== canvas review + REAL video-clip replay (draws the debrief ON the streamed canvas -> TABLET sees it) =====
+let review = null; const REVIEW_MS = 10000;
+let saveBtn = null;
+function ensureSaveBtn() {
+  if (saveBtn) return;
+  saveBtn = document.createElement("button"); saveBtn.id = "saveclip"; saveBtn.textContent = "💾 Save clip";
+  saveBtn.style.cssText = "position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:70;background:#e0a73a;"
+    + "color:#1a1205;border:0;border-radius:28px;padding:15px 30px;font:800 18px -apple-system,system-ui,sans-serif;box-shadow:0 6px 22px #0009;display:none";
+  saveBtn.onclick = () => {
+    const i = review && review.idx; if (i == null || !session[i] || !session[i].clip) return;
+    saveBtn.textContent = "saving…";
+    Promise.resolve(window.shareClip(i)).catch(() => {}).finally(() => { saveBtn.textContent = "💾 Save clip"; });
+  };
+  document.body.appendChild(saveBtn);
+}
+function showSaveBtn() { ensureSaveBtn(); saveBtn.style.display = ""; clearTimeout(showSaveBtn._t); showSaveBtn._t = setTimeout(hideSaveBtn, 18000); }
+function hideSaveBtn() { if (saveBtn) saveBtn.style.display = "none"; }
 function startReview(e, frames) {
   if (e.type !== "handstand" || !frames || frames.length < 3) return false;
   let peak = 0; for (const [, p] of frames) peak = Math.max(peak, aarScore(p).score);
-  review = { frames, secs: e.secs, avg: Math.round(e.avg), peak: Math.round(peak),
-             pointer: aarPointers(frames, "handstand")[0], t0: performance.now() };
+  review = { frames, e, idx: session.length - 1, secs: e.secs, avg: Math.round(e.avg), peak: Math.round(peak),
+             pointer: aarPointers(frames, "handstand")[0], t0: performance.now(), vid: null };
   say(`Held ${e.secs} seconds, form ${Math.round(e.avg)}. ${review.pointer}.`, true);
   sfx.milestone && sfx.milestone();
   return true;
 }
 function drawReview(now) {
   const W = canvas.width, H = canvas.height, s = Math.min(W, H) / 720;
+  // the real footage attaches ~2s after the hold ends -> pick it up lazily and replay it slo-mo
+  if (!review.vid && review.e && review.e.clip) {
+    const v = document.createElement("video");
+    v.src = review.e.clip; v.muted = true; v.loop = true; v.playsInline = true;
+    try { v.playbackRate = 0.55; } catch {}
+    v.play().catch(() => {});
+    review.vid = v; showSaveBtn();
+  }
   ctx.fillStyle = "#0d1014"; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = "#161b22"; ctx.fillRect(0, 0, W, H * 0.135);
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   ctx.fillStyle = "#e0a73a"; ctx.font = `800 ${34 * s}px -apple-system,system-ui,sans-serif`;
   ctx.fillText("HANDSTAND · REPLAY", W / 2, 30 * s);
-  // slo-mo skeleton + alignment-line replay, fitted into the middle band
   const boxT = H * 0.17, boxH = H * 0.5;
-  const dur = Math.max(1000, review.frames[review.frames.length - 1][0]);
-  const el = ((now - review.t0) * 0.45) % (dur + 600);
-  let f = review.frames[0]; for (const fr of review.frames) { if (fr[0] >= el) { f = fr; break; } f = fr; }
-  const p = f[1];
-  let minx = 1, maxx = 0, miny = 1, maxy = 0;
-  for (const q of p) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
-  const pad = 0.12, sw = maxx - minx || 1, sh = maxy - miny || 1, sc = Math.min(W * (1 - pad * 2) / sw, boxH / sh);
-  const ox = (W - sw * sc) / 2 - minx * sc, oy = boxT + (boxH - sh * sc) / 2 - miny * sc;
-  const X = q => q[0] * sc + ox, Y = q => q[1] * sc + oy;
-  const wr = p[4], hp = p[6], off = Math.abs(wr[0] - hp[0]);
-  ctx.setLineDash([12, 9]); ctx.lineWidth = 3 * s; ctx.strokeStyle = off < 0.05 ? "#4cae6a" : off < 0.11 ? "#d29922" : "#f0564b";
-  ctx.beginPath(); ctx.moveTo(X(wr), Y(wr)); ctx.lineTo(X(wr), boxT - H * 0.01); ctx.stroke(); ctx.setLineDash([]);
-  ctx.strokeStyle = "#e9eef3"; ctx.lineWidth = Math.max(3, W * 0.011); ctx.lineCap = "round";
-  for (const [a, b] of AAR_SKEL) { ctx.beginPath(); ctx.moveTo(X(p[a]), Y(p[a])); ctx.lineTo(X(p[b]), Y(p[b])); ctx.stroke(); }
-  ctx.fillStyle = "#e0a73a"; for (const q of p) { ctx.beginPath(); ctx.arc(X(q), Y(q), Math.max(4, W * 0.007), 0, 7); ctx.fill(); }
-  // score + stats + the one thing to work on
+  if (review.vid && review.vid.readyState >= 2 && review.vid.videoWidth) {
+    // the real clip (skeleton + line already baked in), fitted into the band
+    const vw = review.vid.videoWidth, vh = review.vid.videoHeight;
+    const sc = Math.min(W * 0.92 / vw, boxH / vh), dw = vw * sc, dh = vh * sc;
+    ctx.drawImage(review.vid, (W - dw) / 2, boxT + (boxH - dh) / 2, dw, dh);
+  } else {
+    // fallback: slo-mo skeleton + alignment-line replay until the footage is ready
+    const dur = Math.max(1000, review.frames[review.frames.length - 1][0]);
+    const el = ((now - review.t0) * 0.45) % (dur + 600);
+    let f = review.frames[0]; for (const fr of review.frames) { if (fr[0] >= el) { f = fr; break; } f = fr; }
+    const p = f[1];
+    let minx = 1, maxx = 0, miny = 1, maxy = 0;
+    for (const q of p) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
+    const pad = 0.12, sw = maxx - minx || 1, sh = maxy - miny || 1, sc = Math.min(W * (1 - pad * 2) / sw, boxH / sh);
+    const ox = (W - sw * sc) / 2 - minx * sc, oy = boxT + (boxH - sh * sc) / 2 - miny * sc;
+    const X = q => q[0] * sc + ox, Y = q => q[1] * sc + oy;
+    const wr = p[4], hp = p[6], off = Math.abs(wr[0] - hp[0]);
+    ctx.setLineDash([12, 9]); ctx.lineWidth = 3 * s; ctx.strokeStyle = off < 0.05 ? "#4cae6a" : off < 0.11 ? "#d29922" : "#f0564b";
+    ctx.beginPath(); ctx.moveTo(X(wr), Y(wr)); ctx.lineTo(X(wr), boxT - H * 0.01); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = "#e9eef3"; ctx.lineWidth = Math.max(3, W * 0.011); ctx.lineCap = "round";
+    for (const [a, b] of AAR_SKEL) { ctx.beginPath(); ctx.moveTo(X(p[a]), Y(p[a])); ctx.lineTo(X(p[b]), Y(p[b])); ctx.stroke(); }
+    ctx.fillStyle = "#e0a73a"; for (const q of p) { ctx.beginPath(); ctx.arc(X(q), Y(q), Math.max(4, W * 0.007), 0, 7); ctx.fill(); }
+  }
   const by = boxT + boxH + H * 0.02;
+  ctx.textAlign = "center";
   ctx.fillStyle = scoreCol(review.avg); ctx.font = `800 ${118 * s}px -apple-system,system-ui,sans-serif`;
   ctx.shadowColor = "#000"; ctx.shadowBlur = 16 * s; ctx.fillText(String(review.avg), W / 2, by); ctx.shadowBlur = 0;
   ctx.fillStyle = "#9aa4ad"; ctx.font = `700 ${19 * s}px -apple-system,system-ui,sans-serif`;
@@ -600,7 +630,8 @@ function drawReview(now) {
   const prog = Math.min(1, (now - review.t0) / REVIEW_MS);
   ctx.fillStyle = "#e0a73a"; ctx.fillRect(0, H - 6 * s, W * (1 - prog), 6 * s);
 }
-try { canvas.addEventListener("click", () => { if (review) review = null; }); } catch {}
+function endReview() { try { review && review.vid && review.vid.pause(); } catch {} review = null; }
+try { canvas.addEventListener("click", () => { if (review) endReview(); }); } catch {}
 
 // ================= daily move =================
 const KIND_ORDER = ["handstand", "pushups", "squats", "plank", "lsit", "pullups", "pike", "bridge", "front_lever"];
@@ -653,7 +684,7 @@ function loop() {
   if (!landmarker || video.readyState < 2) return;
   if (review) {                                   // handstand debrief on the streamed canvas -> tablet sees it
     if (performance.now() - review.t0 < REVIEW_MS) { drawReview(performance.now()); return; }
-    review = null;
+    endReview();
   }
   ctx.save();
   if (mirrored) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
