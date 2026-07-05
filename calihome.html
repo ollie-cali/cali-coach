@@ -127,6 +127,9 @@ const KEY = "caliHomeCode";
 const SHOWCASE = new URLSearchParams(location.search).has("showcase");   // gym totem mode
 if (SHOWCASE) document.body.classList.add("sc");
 let peer = null, code = SHOWCASE ? null : localStorage.getItem(KEY), live = false, retryT = null, booting = true;
+let peerBornAt = 0, rebuilds = 0;
+// survive a reload (manual or the last-resort auto-reload) without losing the entered code
+try { if (!code) { const pend = sessionStorage.getItem("caliPending"); if (pend) code = pend; } } catch {}
 
 function setStatus(t, dot=true){ $("status").innerHTML = (dot?'<span class="dot"></span>':'') + t; }
 function footer(){
@@ -141,7 +144,8 @@ function toWaiting(){                       // personal: branded idle + auto-hun
   setStatus("waiting for your handstand…"); footer(); hunt();
 }
 function toShowcase(){                      // gym: explainer + QR + input, each visitor pairs their own
-  live = false; code = null; clearTimeout(retryT);
+  live = false; code = null; rebuilds = 0; clearTimeout(retryT);
+  try { sessionStorage.removeItem("caliPending"); } catch {}   // next person starts fresh
   $("live").classList.remove("on"); $("home").style.display = ""; $("status").style.display = "";
   $("show").classList.add("on"); $("pair").classList.add("show"); $("cancel").style.display = "none";
   $("code").value = ""; $("msg").textContent = ""; setStatus("enter your code to connect", true); footer();
@@ -175,37 +179,57 @@ function dropLive(){ toHome(); }
 ["error","emptied","stalled","ended","abort"].forEach(ev => $("v").addEventListener(ev, () => { if (live) dropLive(); }));
 $("leave").addEventListener("click", dropLive);
 
-// ---------- auto-reconnect hunt ----------
-function ensurePeer(){
-  if (peer && !peer.destroyed) return;
+// ---------- self-healing peer + auto-reconnect hunt ----------
+// A fresh Peer() = a clean broker connection, exactly what a page-reload gives you. If the connection
+// ever gets stuck (created but never "open"), we rebuild it instead of waiting forever (the bug where
+// entering the code did nothing until you reloaded).
+function newPeer(){
+  try{ if (peer) peer.destroy(); }catch{}
+  peerBornAt = Date.now();
   try{
     peer = new Peer();
-    peer.on("open", () => { booting = false; if (!live) toHome(); });
+    peer.on("open", () => { booting = false; rebuilds = 0; if (!live) toHome(); });
     peer.on("call", call => { try{ call.answer(); call.on("stream", goLive); }catch{} });
     peer.on("disconnected", () => { try{ peer.reconnect(); }catch{} });
-    peer.on("error", e => { if (e.type === "unavailable-id"){ peer=null; ensurePeer(); } });
-    peer.on("close", () => { peer=null; if(!live) ensurePeer(); });
-  }catch(e){ setTimeout(ensurePeer, 2000); }
+    peer.on("error", e => {
+      // "peer-unavailable" = the phone's code isn't casting yet (normal, keep hunting).
+      // network/server/socket errors = our link to the broker is broken -> rebuild a fresh one.
+      if (["network","server-error","socket-error","socket-closed","unavailable-id","browser-incompatible"].includes(e.type))
+        setTimeout(newPeer, 700);
+    });
+    peer.on("close", () => { if (!live) setTimeout(newPeer, 700); });
+  }catch(e){ setTimeout(newPeer, 1500); }
 }
 function hunt(){
   if (live || !code) return;
-  ensurePeer();
-  if (!peer || !peer.open){ retryT = setTimeout(hunt, 2000); return; }
+  if (!peer || peer.destroyed){ newPeer(); }
+  if (!peer.open){
+    // stuck: created but never opened. Rebuild. After a few failed rebuilds, hard-reload as the
+    // guaranteed fix (the code is stashed in sessionStorage so the reload reconnects seamlessly).
+    if (Date.now() - peerBornAt > 4500){
+      if (++rebuilds >= 3){ try{ sessionStorage.setItem("caliPending", code); }catch{}; location.reload(); return; }
+      setStatus("reconnecting…"); newPeer();
+    }
+    retryT = setTimeout(hunt, 1000); return;
+  }
   try{
     const conn = peer.connect("cali-" + code, { reliable:false });
     if (conn){ conn.on("open", () => { try{ conn.send("mirror-hello"); }catch{} }); conn.on("error", ()=>{}); }
   }catch{}
-  retryT = setTimeout(() => { if (!live) hunt(); }, 3000);
+  retryT = setTimeout(() => { if (!live) hunt(); }, 2500);
 }
 
 // ---------- pairing ----------
 function pair(){
   const c = ($("code").value || "").trim().toUpperCase();
   if (c.length !== 4){ $("msg").textContent = "the code is 4 letters"; return; }
-  code = c;
+  code = c; rebuilds = 0;
   if (!SHOWCASE) localStorage.setItem(KEY, code);      // showcase: ephemeral, resets after each go
+  try { sessionStorage.setItem("caliPending", code); } catch {}   // survive a reload mid-connect
   $("show").classList.remove("on"); $("pair").classList.remove("show"); $("status").style.display = "";
-  setStatus("connecting…"); footer(); hunt();
+  setStatus("connecting…"); footer();
+  if (!peer || !peer.open) newPeer();                  // always attempt from a clean broker connection
+  hunt();
 }
 $("go").onclick = pair;
 $("cancel").onclick = () => toHome();
@@ -218,6 +242,6 @@ window.addEventListener("error", softReset);
 window.addEventListener("unhandledrejection", softReset);
 
 // ---------- boot ----------
-setStatus("starting…"); wake(); ensurePeer();
+setStatus("starting…"); wake(); newPeer();
 setTimeout(() => { if (booting) toHome(); }, 4000);
 </script></body></html>
