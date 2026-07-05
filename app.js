@@ -951,6 +951,7 @@ async function mirrorStart() {
   mirrorCode = localStorage.getItem("caliMirrorCode") || rnd();
   localStorage.setItem("caliMirrorCode", mirrorCode);
   canvasStream ||= canvas.captureStream(30);
+  let idTries = 0;
   const wire = code => {
     mirrorPeer = new Peer("cali-" + code);
     mirrorPeer.on("connection", conn => {
@@ -959,9 +960,17 @@ async function mirrorStart() {
         say("mirror connected", true);
       });
     });
-    mirrorPeer.on("error", e => {                       // saved id already held on the broker -> fresh one
-      if (e.type === "unavailable-id") { mirrorCode = rnd(); localStorage.setItem("caliMirrorCode", mirrorCode); mirrorPeer = null; wire(mirrorCode); }
+    mirrorPeer.on("open", () => { idTries = 0; });      // got our id back cleanly
+    mirrorPeer.on("error", e => {
+      // broker still holds our id from the last session: wait for it to release and RETRY THE SAME code
+      // (do NOT mint a new code, that is what broke the "pair once" promise). New code only as a last resort.
+      if (e.type === "unavailable-id") {
+        try { mirrorPeer.destroy(); } catch {} mirrorPeer = null;
+        if (++idTries <= 5) setTimeout(() => wire(code), 1500);
+        else { mirrorCode = rnd(); localStorage.setItem("caliMirrorCode", mirrorCode); idTries = 0; wire(mirrorCode); }
+      }
     });
+    mirrorPeer.on("disconnected", () => { try { mirrorPeer.reconnect(); } catch {} });
   };
   wire(mirrorCode);
   return new Promise(res => { const t = setInterval(() => { if (mirrorPeer && mirrorPeer.open) { clearInterval(t); res(mirrorCode); } }, 120); });

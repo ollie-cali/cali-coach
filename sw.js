@@ -1,5 +1,5 @@
 // Cali Coach service worker: cache the app shell (same-origin), network-first.
-const CACHE = "cali-coach-v9";
+const CACHE = "cali-coach-v10";
 const SHELL = ["./", "./index.html", "./app.js", "./engine.js", "./scorer.js", "./manifest.json", "./calihome.html", "./mirror.html"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); });
