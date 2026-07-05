@@ -2,6 +2,9 @@ import {
   handstandScore,
   straddleHandstandScore,
   stackHandstandScore,
+  supportHoldScore,
+  deadHangScore,
+  deepSquatScore,
   isInverted,
   isHanging,
   pushupFrame,
@@ -24,6 +27,13 @@ import {
 } from "./scorer.js";
 const VIS_GATE = 0.4, HORIZ_BAND = 0.28;
 const HAND_KINDS = new Set(["handstand", "stack_handstand", "straddle_handstand", "kickup"]);
+// declared-only holds: fire ONLY when the user picks them, so they never add auto-detect false
+// positives. Each: a lenient in-position gate + its form scorer.
+const EXTRA = {
+  support:    { mode: "SUPPORT",    gate: C => C.wri[1] > C.hip[1] + 0.03 && C.wri[1] > C.sho[1], score: supportHoldScore },
+  dead_hang:  { mode: "DEAD HANG",  gate: C => isHanging(C.wri, C.sho, C.hip),                    score: deadHangScore },
+  deep_squat: { mode: "DEEP SQUAT", gate: C => angleAt(C.hip, C.kne, C.ank) < 120,                score: deepSquatScore },
+};
 const HOLD_START_MS = 500, HOLD_END_MS = 700, SET_END_MS = 3e3, MIN_HOLD_S = 1.5;
 const PLANK_ARM_MS = 2500, PLANK_ELBOW_RANGE = 30;
 const round1 = (x) => Math.round(x * 10) / 10;
@@ -38,6 +48,8 @@ class CoachEngine {
     this.locked = kind;
   }
   scoreEMA = new EMA(0.25);
+  xhEMA = new EMA(0.25);
+  xh = { active: false, t0: 0, sum: 0, n: 0, min: 100, lastOk: 0 };
   hs = { active: false, t0: 0, sum: 0, n: 0, min: 100, lastInv: 0, pend: 0 };
   pu = { counter: new RepCounter(), lastActive: 0, lastCue: null, lastScore: null, lastRepAt: 0, lastCount: 0 };
   pk = {
@@ -77,11 +89,34 @@ class CoachEngine {
     else if (this.side === "R" && l > r * 1.15) this.side = "L";
     return this.side;
   }
+  // declared-only holds (support, dead hang, deep squat): self-contained hold timer + scorer.
+  extraHold(kind, C, now) {
+    const cfg = EXTRA[kind];
+    if (cfg.gate(C)) {
+      this.xh.lastOk = now;
+      if (!this.xh.active) { this.xh.active = true; this.xh.t0 = now; this.xh.sum = 0; this.xh.n = 0; this.xh.min = 100; this.xhEMA.v = null; }
+      const r = cfg.score(C);
+      const s = this.xhEMA.feed(r.score);
+      this.xh.sum += r.score; this.xh.n++; this.xh.min = Math.min(this.xh.min, r.score);
+      return { mode: cfg.mode, score: s, cue: r.cue, holdSecs: (now - this.xh.t0) / 1e3, reps: null };
+    }
+    if (this.xh.active) {
+      if (now - this.xh.lastOk > HOLD_END_MS) {
+        const secs = (this.xh.lastOk - this.xh.t0) / 1e3;
+        if (secs > MIN_HOLD_S) this.log({ type: kind, secs: round1(secs), avg: round1(this.xh.sum / Math.max(1, this.xh.n)), min: round1(this.xh.min), at: (/* @__PURE__ */ new Date()).toISOString() });
+        this.xh.active = false;
+        return this.tickIdle(now, "IN FRAME");
+      }
+      return { mode: cfg.mode, score: this.xhEMA.v, cue: null, holdSecs: (now - this.xh.t0) / 1e3, reps: null };
+    }
+    return this.tickIdle(now, "get into position");
+  }
   feed(lm, now) {
     if (!lm) return this.tickIdle(now, "READY");
     const C = chain(lm, this.pickSticky(lm));
     const visible = C.minVis > VIS_GATE;
     if (!visible) return this.tickIdle(now, "READY");
+    if (this.locked && EXTRA[this.locked]) return this.extraHold(this.locked, C, now);
     const inv = isInverted(C.wri, C.sho, C.hip, C.ank);
     const lever = !inv && isFrontLeverPose(C);
     const hang = !inv && !lever && isHanging(C.wri, C.sho, C.hip);
@@ -90,7 +125,8 @@ class CoachEngine {
     const bridge = !inv && !lever && !hang && !lsitEarly && !pikeEarly && isBridgePose(C);
     let pikeP = pikeEarly;
     let lsitP = lsitEarly;
-    let horiz = !inv && !lever && !hang && !bridge && !pikeP && !lsitP && Math.abs(C.sho[1] - C.ank[1]) < HORIZ_BAND && C.wri[1] > C.sho[1] - 0.05;
+    let horiz = !inv && !lever && !hang && !bridge && !pikeP && !lsitP && Math.abs(C.sho[1] - C.ank[1]) < HORIZ_BAND && C.wri[1] > C.sho[1] - 0.05
+      && Math.abs(C.sho[1] - C.hip[1]) < 0.16;   // torso HORIZONTAL (plank/push-up), so an upright floor-sit can't trigger it
     let standing = !inv && !lever && !hang && !bridge && !horiz && !pikeP && !lsitP;
     let invA = inv, leverA = lever, hangA = hang, bridgeA = bridge;
     if (this.locked) {

@@ -260,6 +260,40 @@ export function bridgeScore(wri, sho, hip, kne) {
   return { score, shoulder: shoA, hip: hipA, cue: score >= 88 ? "elite arch" : faults[0][1] };
 }
 
+const clamp = x => Math.max(0, Math.min(100, x));
+
+// SUPPORT hold (top of a dip / parallettes): arms locked straight, shoulders stacked over the hands.
+export function supportHoldScore(C) {
+  const elbow = angleAt(C.sho, C.elb, C.wri);
+  const lean = leanFromVertical(C.wri, C.sho);        // forearm/arm vertical = shoulders over hands
+  const score = clamp(100 - 1.6*(180-elbow) - 1.6*lean);
+  const cue = (180-elbow) > 12 ? "lock your elbows out"
+            : lean > 10 ? "stack your shoulders over your hands"
+            : "strong support — depress the shoulders and hold";
+  return { score, elbow, lean, cue };
+}
+
+// DEAD HANG: passive hang, arms straight, body long under the bar.
+export function deadHangScore(C) {
+  const elbow = angleAt(C.sho, C.elb, C.wri);
+  const bodyLean = leanFromVertical(C.sho, C.hip);
+  const score = clamp(100 - 1.3*(180-elbow) - 1.0*bodyLean);
+  const cue = (180-elbow) > 15 ? "relax — hang with straight arms"
+            : bodyLean > 12 ? "still the swing — hang long" : "solid hang — breathe and relax";
+  return { score, elbow, cue };
+}
+
+// DEEP SQUAT hold (mobility): sit at the bottom, hips below the knees, chest tall.
+export function deepSquatScore(C) {
+  const knee = angleAt(C.hip, C.kne, C.ank);
+  const lean = torsoLean(C.sho, C.hip);
+  const depth = clamp((130 - knee) / 65 * 100);       // deeper knee bend = better
+  const score = clamp(depth - 1.4 * Math.max(0, lean - 15));
+  const cue = knee > 110 ? "sink deeper — hips below the knees"
+            : lean > 28 ? "chest tall — stop folding forward" : "great depth — relax into the hole";
+  return { score, knee, lean, depth, cue };
+}
+
 // posture predicates on a chain C (shared by app + engine so detection can't drift)
 export function isFrontLeverPose(C) {
   return C.wri[1] < C.sho[1] - 0.04 && Math.abs(C.sho[1]-C.ank[1]) < 0.15 && Math.abs(C.sho[0]-C.ank[0]) > 0.15;
@@ -277,10 +311,16 @@ export function isPikePose(C) {
   const seated = Math.abs(C.ank[1]-C.hip[1]) < 0.14 && Math.abs(C.ank[0]-C.hip[0]) > 0.15;
   // standing forward fold: ankles well below hips, legs STRAIGHT, hands hanging below shoulders
   const standing = (C.ank[1]-C.hip[1]) > 0.15 && angleAt(C.hip, C.kne, C.ank) > 150 && C.wri[1] > C.sho[1] - 0.02;
-  return fold < 95 && (seated || standing);   // corpus: the library's pikes are STANDING folds
+  // fold < 80 (a real chest-to-thigh hinge), not < 95: upright sitting legs-out is ~90 and must NOT
+  // read as a pike fold. [fix, same class as the L-sit floor bug]
+  return fold < 80 && (seated || standing);
 }
 export function isLsitPose(C) {
   const legAngleAbs = Math.abs(Math.atan2(C.hip[1]-C.ank[1], Math.abs(C.ank[0]-C.hip[0])) * 180 / Math.PI);
-  return torsoLean(C.sho, C.hip) < 25 && C.wri[1] > C.sho[1] && legAngleAbs < 25
-      && Math.abs(C.ank[0]-C.hip[0]) > 0.12 && C.ank[1] < C.hip[1] + 0.08;
+  // MUST be SUPPORTED: the hands press below the hips (hips lifted off the floor), not just
+  // sitting. Sitting on the floor has hands roughly level with the hips (wri ~ hip), so it fails
+  // this gate. This kills the "sitting on the floor reads as an L-sit" false positive. [fix]
+  return torsoLean(C.sho, C.hip) < 25
+      && C.wri[1] > C.hip[1] + 0.05 && C.wri[1] > C.sho[1]   // hands below hips (supported) + below shoulders
+      && legAngleAbs < 25 && Math.abs(C.ank[0]-C.hip[0]) > 0.12 && C.ank[1] < C.hip[1] + 0.08;
 }

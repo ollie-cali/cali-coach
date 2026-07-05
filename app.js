@@ -119,10 +119,12 @@ function framingTick(lm, out, now) {
 }
 
 // ================= movement announcements =================
-const ACTIVE = new Set(["HANDSTAND", "PUSH-UP", "PLANK", "SQUAT", "PULL-UP", "FRONT LEVER", "L-SIT", "PIKE", "BRIDGE"]);
+const ACTIVE = new Set(["HANDSTAND", "PUSH-UP", "PLANK", "SQUAT", "PULL-UP", "FRONT LEVER", "L-SIT", "PIKE", "BRIDGE",
+  "SUPPORT", "DEAD HANG", "DEEP SQUAT"]);
 const MODE_SAY = { HANDSTAND: "handstand — timer running", "PUSH-UP": "push-ups — counting", PLANK: "plank detected — hold it",
   SQUAT: "squats — counting", "PULL-UP": "pull-ups — counting", "FRONT LEVER": "front lever — hold it",
-  "L-SIT": "L-sit — hold it", PIKE: "pike fold — sink into it", BRIDGE: "bridge — push up" };
+  "L-SIT": "L-sit — hold it", PIKE: "pike fold — sink into it", BRIDGE: "bridge — push up",
+  SUPPORT: "support hold — lock it out", "DEAD HANG": "dead hang — relax and hang", "DEEP SQUAT": "deep squat — sink and hold" };
 let prevMode = "READY", toast = null, milestoneNext = 0;
 function announceTick(out, now) {
   if (out.mode !== prevMode) {
@@ -145,7 +147,8 @@ function setCue(c) { const now = performance.now();
   if (!c) lastCue = ""; }
 function scoreCol(s) { return s >= 85 ? "#4cae6a" : s >= 65 ? "#e0a73a" : "#f0564b"; }
 const MODE_COL = { HANDSTAND: null, "PUSH-UP": "#58a6ff", PLANK: "#a371f7", SQUAT: "#d29922", "PULL-UP": "#3fb950",
-  "FRONT LEVER": "#f0564b", "L-SIT": "#e0a73a", PIKE: "#4cae6a", BRIDGE: "#db61a2", "IN FRAME": "#9aa4ad", READY: "#9aa4ad" };
+  "FRONT LEVER": "#f0564b", "L-SIT": "#e0a73a", PIKE: "#4cae6a", BRIDGE: "#db61a2",
+  SUPPORT: "#3fb950", "DEAD HANG": "#58a6ff", "DEEP SQUAT": "#d29922", "IN FRAME": "#9aa4ad", READY: "#9aa4ad" };
 
 function roundRect(x, y, w, h, r) {
   ctx.beginPath(); ctx.moveTo(x + r, y);
@@ -335,7 +338,8 @@ function levelLandmarks(lm) {
 const KINDS = { handstand: "Handstand", stack_handstand: "Stack handstand",
   straddle_handstand: "Straddle handstand", kickup: "Kick-up to handstand",
   pushups: "Push-ups", squats: "Squats", pullups: "Pull-ups",
-  plank: "Plank", front_lever: "Front lever", lsit: "L-sit", pike: "Pike fold", bridge: "Bridge" };
+  plank: "Plank", front_lever: "Front lever", lsit: "L-sit", pike: "Pike fold", bridge: "Bridge",
+  support: "Support hold", dead_hang: "Dead hang", deep_squat: "Deep squat" };
 let locked = null;
 function setLock(kind) {
   locked = kind; engine.lock(kind);
@@ -435,7 +439,7 @@ let ghostOn = JSON.parse(localStorage.getItem("caliGhost_on") ?? "true");
 let ghostRec = [], ghostStart = 0, ghostPlay = null, ghostBeaten = false, lastGhostSample = 0;
 const ghosts = JSON.parse(localStorage.getItem("caliGhosts") || "{}");
 const MODE_TO_KIND = { HANDSTAND: "handstand", PLANK: "plank", "FRONT LEVER": "front_lever",
-  "L-SIT": "lsit", PIKE: "pike", BRIDGE: "bridge" };
+  "L-SIT": "lsit", PIKE: "pike", BRIDGE: "bridge", SUPPORT: "support", "DEAD HANG": "dead_hang", "DEEP SQUAT": "deep_squat" };
 
 function ghostTick(lm, out, now) {
   const active = ACTIVE.has(out.mode);
@@ -472,7 +476,7 @@ function ghostTick(lm, out, now) {
   }
 }
 function ghostSave(e) {
-  const holdKinds = ["handstand", "plank", "front_lever", "lsit", "pike", "bridge"];
+  const holdKinds = ["handstand", "plank", "front_lever", "lsit", "pike", "bridge", "support", "dead_hang", "deep_squat"];
   if (!holdKinds.includes(e.type) || !ghostRec.length) return;
   const prev = ghosts[e.type];
   if (!prev || e.secs > prev.secs) {
@@ -484,7 +488,7 @@ function ghostSave(e) {
 
 // ================= after-action report (skill debrief + instant replay) =================
 // ghost joint order: 0 Lsho,1 Rsho,2 Lelb,3 Relb,4 Lwri,5 Rwri,6 Lhip,7 Rhip,8 Lkne,9 Rkne,10 Lank,11 Rank
-const HOLD_KINDS = ["handstand", "plank", "front_lever", "lsit", "pike", "bridge"];
+const HOLD_KINDS = ["handstand", "plank", "front_lever", "lsit", "pike", "bridge", "support", "dead_hang", "deep_squat"];
 const AAR_SKEL = [[0,2],[2,4],[1,3],[3,5],[0,1],[0,6],[1,7],[6,7],[6,8],[8,10],[7,9],[9,11]];
 const acanvas = $("aarcanvas"), actx = acanvas.getContext("2d");
 let aar = null;
