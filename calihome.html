@@ -1,12 +1,12 @@
 <!doctype html>
 <!-- ============================================================================
-     CALIHOME — the handstand-board screen. Not a browser: a purpose-built Cali
-     device face. Pairs ONCE to a phone running Cali Coach (⚙ > Mirror), saves the
-     code, and auto-reconnects itself for good. The phone films + scores + casts;
-     this shows it fullscreen. Runs locked in Fully Kiosk on the Tab A8 (SM-X205).
-     Onyx/Bone/Amber/Gold — the Skill-Swirl palette.
-     Crash-proof: any error/disconnect returns to the branded waiting screen and
-     keeps hunting for the phone. A visible "pair a different phone" is always there.
+     CALIHOME — the handstand-board screen + gym showcase.
+     Personal mode (default): pairs once to your phone, auto-reconnects for good.
+     Showcase mode (?showcase): a self-explaining gym totem — a QR to open the
+     handstand-locked coach on any phone, the 5 steps, and a code box. Each visitor
+     pairs their own phone; resets after each go. The phone films/scores/casts; this
+     shows it fullscreen. Crash-proof: any error/drop returns to the home screen.
+     Onyx/Bone/Amber/Gold — the Skill-Swirl palette. Runs locked in Fully Kiosk.
 ============================================================================ -->
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -17,37 +17,48 @@
   *{box-sizing:border-box;margin:0;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
   html,body{height:100%;overflow:hidden;background:var(--onyx);color:var(--bone);
     font-family:"Helvetica Neue",Arial,system-ui,sans-serif;touch-action:none}
-  #bg{position:fixed;inset:0;background:radial-gradient(120% 90% at 50% 40%, #23231b 0%, #1A1A1E 55%, #0e0e10 100%)}
-  .ring{position:fixed;top:40%;left:50%;width:180px;height:180px;margin:-90px 0 0 -90px;border-radius:50%;
+  #bg{position:fixed;inset:0;background:radial-gradient(120% 90% at 50% 38%, #23231b 0%, #1A1A1E 55%, #0e0e10 100%)}
+  .ring{position:fixed;top:34%;left:50%;width:170px;height:170px;margin:-85px 0 0 -85px;border-radius:50%;
     border:1.5px solid var(--gold);opacity:0;animation:sonar 4.2s ease-out infinite}
   .ring:nth-child(2){animation-delay:1.4s} .ring:nth-child(3){animation-delay:2.8s}
-  @keyframes sonar{0%{transform:scale(.5);opacity:.55}70%{opacity:.06}100%{transform:scale(3.4);opacity:0}}
+  @keyframes sonar{0%{transform:scale(.5);opacity:.5}70%{opacity:.05}100%{transform:scale(3.2);opacity:0}}
   @media (prefers-reduced-motion:reduce){.ring{animation:none}}
 
-  #home{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center;padding:5vh 4vw}
-  .mark{font-weight:900;letter-spacing:.14em;font-size:clamp(42px,8.5vw,100px);line-height:.92}
+  #home{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:3vh 4vw}
+  .mark{font-weight:900;letter-spacing:.14em;font-size:clamp(38px,7vw,84px);line-height:.92}
   .mark b{color:var(--amber)}
-  .tag{color:var(--sub);letter-spacing:.42em;font-size:clamp(11px,1.9vw,15px);text-transform:uppercase;font-weight:700;margin-top:6px}
-  .status{margin-top:6px;color:var(--bone);font-size:clamp(15px,2.4vw,20px);min-height:1.4em;font-weight:500}
+  .tag{color:var(--sub);letter-spacing:.42em;font-size:clamp(10px,1.7vw,14px);text-transform:uppercase;font-weight:700;margin-top:5px}
+  .status{color:var(--bone);font-size:clamp(14px,2.2vw,19px);min-height:1.3em;font-weight:500}
   .status .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--amber);margin-right:9px;vertical-align:middle;animation:blink 1.3s ease-in-out infinite}
   @keyframes blink{50%{opacity:.25}}
 
-  /* pairing block (hidden unless pairing) */
-  #pair{display:none;flex-direction:column;align-items:center;gap:16px;margin-top:4px}
+  /* showcase: QR + steps + input, a horizontal totem card */
+  #show{display:none} #show.on{display:flex;align-items:center;gap:clamp(20px,4vw,54px);flex-wrap:wrap;justify-content:center}
+  body.sc #pair p{display:none}   /* showcase: the numbered steps replace the instruction paragraph */
+  .qr{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .qr img{width:clamp(150px,20vw,220px);height:auto;border-radius:14px;background:var(--bone);padding:10px}
+  .qr span{color:var(--gold);letter-spacing:.16em;text-transform:uppercase;font-size:12px;font-weight:800}
+  .steps{text-align:left;display:flex;flex-direction:column;gap:11px;max-width:440px}
+  .step{display:flex;align-items:center;gap:13px;font-size:clamp(14px,1.9vw,18px);color:var(--bone)}
+  .step .n{flex:0 0 auto;width:30px;height:30px;border-radius:50%;background:#2a2a24;color:var(--amber);
+    font-weight:800;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .step b{color:var(--amber)}
+
+  /* code input */
+  #pair{display:none;flex-direction:column;align-items:center;gap:14px;margin-top:2px}
   #pair.show{display:flex}
   #pair p{color:var(--sub);max-width:460px;font-size:15px;line-height:1.5}
   #pair p b{color:var(--bone)}
-  input{background:#121216;border:1.5px solid #34342c;color:var(--amber);border-radius:16px;padding:14px;
-    font-size:38px;width:240px;text-align:center;letter-spacing:14px;text-transform:uppercase;font-weight:800;outline:none}
+  input{background:#121216;border:1.5px solid #34342c;color:var(--amber);border-radius:16px;padding:13px;
+    font-size:clamp(30px,4vw,40px);width:min(240px,70vw);text-align:center;letter-spacing:14px;text-transform:uppercase;font-weight:800;outline:none}
   input:focus{border-color:var(--amber)}
-  .row{display:flex;gap:12px;align-items:center}
-  button{background:var(--amber);color:#1a1205;border:0;border-radius:14px;padding:14px 30px;font-size:17px;font-weight:800;letter-spacing:.03em}
+  .rowb{display:flex;gap:12px;align-items:center}
+  button{background:var(--amber);color:#1a1205;border:0;border-radius:14px;padding:13px 30px;font-size:17px;font-weight:800;letter-spacing:.03em}
   button.ghost{background:transparent;color:var(--sub);border:1.5px solid #34342c}
   button:active{transform:translateY(1px)}
   .msg{color:var(--crimson);font-size:14px;min-height:1.1em}
 
-  /* always-visible re-pair control on the waiting screen */
-  #footer{position:fixed;bottom:20px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:8px}
+  #footer{position:fixed;bottom:18px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:8px}
   #paired{color:var(--sub);font-size:13px;letter-spacing:.18em;text-transform:uppercase}
   #paired b{color:var(--gold);letter-spacing:.28em}
   #repairbtn{background:transparent;border:1.5px solid #34342c;color:var(--sub);border-radius:20px;padding:9px 18px;font-size:13px;font-weight:700;letter-spacing:.04em}
@@ -57,13 +68,10 @@
   #bar{position:fixed;top:0;left:0;right:0;height:46px;display:none;align-items:center;justify-content:space-between;
     padding:0 18px;background:linear-gradient(#000a,transparent);pointer-events:none;transition:opacity .5s;z-index:5}
   #live.on #bar{display:flex}
-  #bar .b-mark{font-weight:900;letter-spacing:.14em;font-size:16px}
-  #bar .b-mark b{color:var(--amber)}
+  #bar .b-mark{font-weight:900;letter-spacing:.14em;font-size:16px} #bar .b-mark b{color:var(--amber)}
   #bar .b-live{color:var(--crimson);font-weight:800;letter-spacing:.12em;font-size:13px}
   #bar .b-live i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--crimson);margin-right:7px;animation:blink 1.1s infinite}
-  /* a small always-tappable exit from live back to home (top-left), for when a stream hangs */
-  #leave{position:fixed;top:0;left:0;width:90px;height:60px;z-index:8;display:none}
-  #live.on #leave{display:block}
+  #leave{position:fixed;top:0;left:0;width:90px;height:60px;z-index:8;display:none} #live.on #leave{display:block}
 </style></head><body>
 <div id="bg"></div>
 <div class="ring"></div><div class="ring"></div><div class="ring"></div>
@@ -73,12 +81,27 @@
     <div class="mark">CALI<b>HOME</b></div>
     <div class="tag">Handstand Mirror</div>
   </div>
+
+  <div id="show">
+    <div class="qr">
+      <img id="qr" alt="scan to start" src="data:image/png;base64,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">
+      <span>Scan to start</span>
+    </div>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><div><b>Scan the code</b> with your phone camera</div></div>
+      <div class="step"><span class="n">2</span><div>Tap <b>⚙ → Get mirror code</b></div></div>
+      <div class="step"><span class="n">3</span><div>Type that code <b>below</b> 👇</div></div>
+      <div class="step"><span class="n">4</span><div>Turn your phone <b>volume up</b></div></div>
+      <div class="step"><span class="n">5</span><div><b>Kick up</b> — watch how straight you are</div></div>
+    </div>
+  </div>
+
   <div class="status" id="status"><span class="dot"></span>starting…</div>
 
   <div id="pair">
     <p>On your phone open <b>Cali Coach</b> → ⚙ → <b>Mirror to a screen</b> → <b>Get mirror code</b>, then type it here.</p>
     <input id="code" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" inputmode="text">
-    <div class="row">
+    <div class="rowb">
       <button id="go">Pair</button>
       <button id="cancel" class="ghost" style="display:none">Cancel</button>
     </div>
@@ -101,62 +124,67 @@
 <script>
 const $ = id => document.getElementById(id);
 const KEY = "caliHomeCode";
-let peer = null, code = localStorage.getItem(KEY), live = false, retryT = null, booting = true;
+const SHOWCASE = new URLSearchParams(location.search).has("showcase");   // gym totem mode
+if (SHOWCASE) document.body.classList.add("sc");
+let peer = null, code = SHOWCASE ? null : localStorage.getItem(KEY), live = false, retryT = null, booting = true;
 
-function setStatus(t, showDot=true){ $("status").innerHTML = (showDot?'<span class="dot"></span>':'') + t; }
+function setStatus(t, dot=true){ $("status").innerHTML = (dot?'<span class="dot"></span>':'') + t; }
 function footer(){
-  $("paired").innerHTML = code ? `paired · <b>${code}</b>` : "";
-  $("repairbtn").style.display = (code && !$("pair").classList.contains("show")) ? "" : "none";
+  $("paired").innerHTML = (!SHOWCASE && code) ? `paired · <b>${code}</b>` : "";
+  $("repairbtn").style.display = (!SHOWCASE && code && !$("pair").classList.contains("show")) ? "" : "none";
 }
 
 // ---------- screen states ----------
-function toWaiting(){                    // saved code: branded idle + hunt + visible re-pair
+function toWaiting(){                       // personal: branded idle + auto-hunt saved code
   live = false; $("live").classList.remove("on"); $("home").style.display = "";
-  $("pair").classList.remove("show"); $("status").style.display = "";
+  $("show").classList.remove("on"); $("pair").classList.remove("show"); $("status").style.display = "";
   setStatus("waiting for your handstand…"); footer(); hunt();
 }
-function toPair(preset){                 // show the code input (first run OR "pair a different phone")
-  live = false; clearTimeout(retryT); $("live").classList.remove("on"); $("home").style.display = "";
-  $("status").style.display = "none"; $("pair").classList.add("show");
-  $("cancel").style.display = code ? "" : "none";     // cancel only makes sense if a code already exists
-  if (preset !== undefined) $("code").value = preset;
-  $("msg").textContent = ""; footer();
-  try { $("code").focus(); } catch {}
+function toShowcase(){                      // gym: explainer + QR + input, each visitor pairs their own
+  live = false; code = null; clearTimeout(retryT);
+  $("live").classList.remove("on"); $("home").style.display = ""; $("status").style.display = "";
+  $("show").classList.add("on"); $("pair").classList.add("show"); $("cancel").style.display = "none";
+  $("code").value = ""; $("msg").textContent = ""; setStatus("enter your code to connect", true); footer();
 }
+function toPair(preset){                    // personal: show the input (first run / re-pair)
+  live = false; clearTimeout(retryT); $("live").classList.remove("on"); $("home").style.display = "";
+  $("show").classList.remove("on"); $("status").style.display = "none"; $("pair").classList.add("show");
+  $("cancel").style.display = code ? "" : "none";
+  if (preset !== undefined) $("code").value = preset;
+  $("msg").textContent = ""; footer(); try { $("code").focus(); } catch {}
+}
+function toHome(){ SHOWCASE ? toShowcase() : (code ? toWaiting() : toPair()); }
 
-// ---------- wake lock (Fully also keeps the screen on) ----------
 async function wake(){ try{ await navigator.wakeLock?.request("screen"); }catch{} }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ wake(); if (!live) hunt(); } });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ wake(); if (!live && code) hunt(); } });
 
-// ---------- live stream ----------
+// ---------- live ----------
 function goLive(stream){
   try{
     clearTimeout(retryT); live = true;
     const v = $("v"); v.srcObject = stream;
-    $("live").classList.add("on"); $("home").style.display = "none"; $("pair").classList.remove("show");
+    $("live").classList.add("on"); $("home").style.display = "none"; $("pair").classList.remove("show"); $("show").classList.remove("on");
     v.play?.().catch(()=>{});
     try{ document.documentElement.requestFullscreen?.().catch(()=>{}); }catch{}
-    const t = stream.getVideoTracks?.()[0];
-    t && t.addEventListener("ended", dropLive);
+    const t = stream.getVideoTracks?.()[0]; t && t.addEventListener("ended", dropLive);
     stream.addEventListener?.("inactive", dropLive);
     $("bar").style.opacity = 1; setTimeout(()=>{ $("bar").style.opacity = 0; }, 3500);
   }catch(e){ dropLive(); }
 }
-function dropLive(){ if (!code){ toPair(); return; } toWaiting(); }
-// any video trouble -> fall back gracefully, never a black screen
+function dropLive(){ toHome(); }
 ["error","emptied","stalled","ended","abort"].forEach(ev => $("v").addEventListener(ev, () => { if (live) dropLive(); }));
 $("leave").addEventListener("click", dropLive);
 
-// ---------- the auto-reconnect hunt ----------
+// ---------- auto-reconnect hunt ----------
 function ensurePeer(){
   if (peer && !peer.destroyed) return;
   try{
     peer = new Peer();
-    peer.on("open", () => { booting = false; if (!live){ code ? toWaiting() : toPair(); } });
+    peer.on("open", () => { booting = false; if (!live) toHome(); });
     peer.on("call", call => { try{ call.answer(); call.on("stream", goLive); }catch{} });
     peer.on("disconnected", () => { try{ peer.reconnect(); }catch{} });
-    peer.on("error", e => { if (e.type === "unavailable-id"){ peer=null; ensurePeer(); } });  // peer-unavailable is normal (phone not up): ignore, hunt retries
-    peer.on("close", () => { peer=null; if(!live){ ensurePeer(); } });
+    peer.on("error", e => { if (e.type === "unavailable-id"){ peer=null; ensurePeer(); } });
+    peer.on("close", () => { peer=null; if(!live) ensurePeer(); });
   }catch(e){ setTimeout(ensurePeer, 2000); }
 }
 function hunt(){
@@ -167,28 +195,29 @@ function hunt(){
     const conn = peer.connect("cali-" + code, { reliable:false });
     if (conn){ conn.on("open", () => { try{ conn.send("mirror-hello"); }catch{} }); conn.on("error", ()=>{}); }
   }catch{}
-  retryT = setTimeout(() => { if (!live) hunt(); }, 3000);   // phone offline -> keep trying the same code
+  retryT = setTimeout(() => { if (!live) hunt(); }, 3000);
 }
 
-// ---------- first-run / re-pair input ----------
+// ---------- pairing ----------
 function pair(){
   const c = ($("code").value || "").trim().toUpperCase();
   if (c.length !== 4){ $("msg").textContent = "the code is 4 letters"; return; }
-  code = c; localStorage.setItem(KEY, code);
-  toWaiting();
+  code = c;
+  if (!SHOWCASE) localStorage.setItem(KEY, code);      // showcase: ephemeral, resets after each go
+  $("show").classList.remove("on"); $("pair").classList.remove("show"); $("status").style.display = "";
+  setStatus("connecting…"); footer(); hunt();
 }
 $("go").onclick = pair;
-$("cancel").onclick = () => { toWaiting(); };
+$("cancel").onclick = () => toHome();
 $("code").addEventListener("keydown", e => { if (e.key === "Enter") pair(); });
-$("repairbtn").onclick = () => toPair("");   // visible "pair a different phone"
+$("repairbtn").onclick = () => toPair("");
 
-// ---------- never white-screen: any uncaught error returns to a safe state ----------
-function softReset(){ try{ if (live){ live=false; $("live").classList.remove("on"); } code ? toWaiting() : toPair(); }catch{} }
+// ---------- never white-screen ----------
+function softReset(){ try{ if (live){ live=false; $("live").classList.remove("on"); } toHome(); }catch{} }
 window.addEventListener("error", softReset);
 window.addEventListener("unhandledrejection", softReset);
 
 // ---------- boot ----------
-setStatus("starting…"); wake();
-ensurePeer();
-setTimeout(() => { if (booting){ code ? toWaiting() : toPair(); } }, 4000);   // fallback if the broker is slow
+setStatus("starting…"); wake(); ensurePeer();
+setTimeout(() => { if (booting) toHome(); }, 4000);
 </script></body></html>

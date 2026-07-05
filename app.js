@@ -976,5 +976,28 @@ async function mirrorStart() {
   return new Promise(res => { const t = setInterval(() => { if (mirrorPeer && mirrorPeer.open) { clearInterval(t); res(mirrorCode); } }, 120); });
 }
 
+// ================= showcase / locked mode (gym CaliHome) =================
+// ?only=handstand  -> lock to one movement, hide the picker/session/history so nothing can be
+// changed, and surface the CaliHome cast code as a persistent banner (auto-starts the mirror).
+(function showcase() {
+  const only = new URLSearchParams(location.search).get("only");
+  if (!only || !KINDS[only]) return;
+  const apply = () => {
+    setLock(only);
+    ["pick", "sessionbtn", "historybtn"].forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
+    const b = document.createElement("div");
+    b.id = "castbanner";
+    b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
+      + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
+    b.textContent = "📺 starting CaliHome cast…";
+    document.body.appendChild(b);
+    mirrorStart()
+      .then(c => { b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`; })
+      .catch(() => { b.textContent = "📺 cast unavailable — check wifi"; });
+  };
+  // wait until the engine + camera loop are live (the splash "start" tap) so the canvas can stream
+  const t = setInterval(() => { if (typeof engine !== "undefined" && engine && !document.getElementById("splash")) { clearInterval(t); apply(); } }, 200);
+})();
+
 // ================= PWA =================
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
