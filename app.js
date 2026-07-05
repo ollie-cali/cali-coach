@@ -570,11 +570,22 @@ function ensureSaveBtn() {
 }
 function showSaveBtn() { ensureSaveBtn(); saveBtn.style.display = ""; clearTimeout(showSaveBtn._t); showSaveBtn._t = setTimeout(hideSaveBtn, 18000); }
 function hideSaveBtn() { if (saveBtn) saveBtn.style.display = "none"; }
+const clamp100 = x => Math.max(0, Math.min(100, x));
+const RATING = a => a >= 92 ? "STACKED" : a >= 82 ? "SOLID" : a >= 70 ? "GETTING THERE" : "KEEP GOING";
 function startReview(e, frames) {
   if (e.type !== "handstand" || !frames || frames.length < 3) return false;
-  let peak = 0; for (const [, p] of frames) peak = Math.max(peak, aarScore(p).score);
+  // average each body part across the hold -> a per-part breakdown (which bit let you down)
+  let peak = 0, sSho = 0, sHip = 0, sKne = 0, sLn = 0, n = 0;
+  for (const [, p] of frames) { const r = aarScore(p); peak = Math.max(peak, r.score);
+    sSho += r.shoulder; sHip += r.hip; sKne += r.knee; sLn += r.lean; n++; }
+  const sub = [
+    ["SHOULDERS", clamp100(100 - 2.5 * Math.max(0, (180 - sSho / n) - 3))],
+    ["HIPS",      clamp100(100 - 2.5 * Math.max(0, (180 - sHip / n) - 3))],
+    ["LEGS",      clamp100(100 - 2.5 * Math.max(0, (180 - sKne / n) - 4))],
+    ["STACK",     clamp100(100 - 5.0 * Math.max(0, (sLn / n) - 2))],
+  ];
   review = { frames, e, idx: session.length - 1, secs: e.secs, avg: Math.round(e.avg), peak: Math.round(peak),
-             pointer: aarPointers(frames, "handstand")[0], t0: performance.now(), vid: null };
+             rating: RATING(e.avg), sub, pointer: aarPointers(frames, "handstand")[0], t0: performance.now(), vid: null };
   say(`Held ${e.secs} seconds, form ${Math.round(e.avg)}. ${review.pointer}.`, true);
   sfx.milestone && sfx.milestone();
   return true;
@@ -594,7 +605,7 @@ function drawReview(now) {
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   ctx.fillStyle = "#e0a73a"; ctx.font = `800 ${34 * s}px -apple-system,system-ui,sans-serif`;
   ctx.fillText("HANDSTAND · REPLAY", W / 2, 30 * s);
-  const boxT = H * 0.17, boxH = H * 0.5;
+  const boxT = H * 0.16, boxH = H * 0.4;
   if (review.vid && review.vid.readyState >= 2 && review.vid.videoWidth) {
     // the real clip (skeleton + line already baked in), fitted into the band
     const vw = review.vid.videoWidth, vh = review.vid.videoHeight;
@@ -618,14 +629,31 @@ function drawReview(now) {
     for (const [a, b] of AAR_SKEL) { ctx.beginPath(); ctx.moveTo(X(p[a]), Y(p[a])); ctx.lineTo(X(p[b]), Y(p[b])); ctx.stroke(); }
     ctx.fillStyle = "#e0a73a"; for (const q of p) { ctx.beginPath(); ctx.arc(X(q), Y(q), Math.max(4, W * 0.007), 0, 7); ctx.fill(); }
   }
-  const by = boxT + boxH + H * 0.02;
+  const by = boxT + boxH + H * 0.03;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  // score + rating word + stats
+  ctx.fillStyle = scoreCol(review.avg); ctx.font = `800 ${92 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.shadowColor = "#000"; ctx.shadowBlur = 14 * s; ctx.fillText(String(review.avg), W / 2, by); ctx.shadowBlur = 0;
+  ctx.fillStyle = scoreCol(review.avg); ctx.font = `900 ${24 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillText(review.rating, W / 2, by + 96 * s);
+  ctx.fillStyle = "#8b8778"; ctx.font = `700 ${17 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillText(`peak ${review.peak}  ·  held ${review.secs}s`, W / 2, by + 126 * s);
+  // the per-body-part breakdown (which bit let you down)
+  const bw = Math.min(W * 0.19, 240 * s), gap = bw * 0.28, rowW = bw * 4 + gap * 3;
+  let bx = (W - rowW) / 2, byBar = by + 158 * s;
   ctx.textAlign = "center";
-  ctx.fillStyle = scoreCol(review.avg); ctx.font = `800 ${118 * s}px -apple-system,system-ui,sans-serif`;
-  ctx.shadowColor = "#000"; ctx.shadowBlur = 16 * s; ctx.fillText(String(review.avg), W / 2, by); ctx.shadowBlur = 0;
-  ctx.fillStyle = "#9aa4ad"; ctx.font = `700 ${19 * s}px -apple-system,system-ui,sans-serif`;
-  ctx.fillText(`FORM   ·   peak ${review.peak}   ·   held ${review.secs}s`, W / 2, by + 122 * s);
-  ctx.fillStyle = "#e9eef3"; ctx.font = `700 ${25 * s}px -apple-system,system-ui,sans-serif`;
-  ctx.fillText("Work on:  " + review.pointer, W / 2, by + 156 * s);
+  for (const [label, val] of review.sub) {
+    const col = val >= 85 ? "#4cae6a" : val >= 65 ? "#e0a73a" : "#f0564b";
+    ctx.fillStyle = "#8b8778"; ctx.font = `800 ${13 * s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillText(label, bx + bw / 2, byBar);
+    ctx.fillStyle = "#2a2a24"; roundRect(bx, byBar + 20 * s, bw, 9 * s, 4 * s); ctx.fill();
+    ctx.fillStyle = col; roundRect(bx, byBar + 20 * s, bw * val / 100, 9 * s, 4 * s); ctx.fill();
+    ctx.fillStyle = col; ctx.font = `800 ${17 * s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillText(Math.round(val), bx + bw / 2, byBar + 34 * s);
+    bx += bw + gap;
+  }
+  ctx.fillStyle = "#e9eef3"; ctx.font = `700 ${23 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillText("Work on:  " + review.pointer, W / 2, byBar + 66 * s);
   ctx.textAlign = "left";
   const prog = Math.min(1, (now - review.t0) / REVIEW_MS);
   ctx.fillStyle = "#e0a73a"; ctx.fillRect(0, H - 6 * s, W * (1 - prog), 6 * s);

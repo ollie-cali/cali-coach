@@ -20,37 +20,47 @@ export function leanFromVertical(P, Q) {
 // ---------------- HANDSTAND ----------------
 const W_SHO = 0.8, W_HIP = 0.9, W_KNE = 0.4, W_LEAN = 1.2;
 
+// tie-break identical to Python's max() on (value, string): value desc, then string desc
+const worstFault = arr => arr.sort((a, b) => (b[0] - a[0]) || (a[1] > b[1] ? -1 : a[1] < b[1] ? 1 : 0))[0];
+
 export function handstandScore(wri, sho, hip, kne, ank) {
   const shoA = angleAt(wri, sho, hip);
   const hipA = angleAt(sho, hip, kne);
   const kneA = angleAt(hip, kne, ank);
   const lean = leanFromVertical(wri, hip);
-  const dSho = 180-shoA, dHip = 180-hipA, dKne = 180-kneA;
-  let score = 100 - W_SHO*dSho - W_HIP*dHip - W_KNE*dKne - W_LEAN*lean;
+  // deadzone: a few degrees of tolerance (noise + human margin) so a near-perfect line reads ~100.
+  const dSho = Math.max(0, (180 - shoA) - 3);
+  const dHip = Math.max(0, (180 - hipA) - 3);
+  const dKne = Math.max(0, (180 - kneA) - 4);
+  const dLean = Math.max(0, lean - 2);
+  let score = 100 - W_SHO*dSho - W_HIP*dHip - W_KNE*dKne - W_LEAN*dLean;
   score = Math.max(0, Math.min(100, score));
-  const faults = [
+  // a big fold at the hip is a pike (legs forward); a subtle arch is a banana (ribs flared)
+  const hipCue = (180 - hipA) > 40 ? "open the pike — bring your legs over" : "ribs in — kill the banana";
+  const faults = worstFault([
     [dSho*W_SHO, "open your shoulders"],
-    [dHip*W_HIP, "ribs in — kill the banana"],
+    [dHip*W_HIP, hipCue],
     [dKne*W_KNE, "squeeze your legs straight"],
-    [lean*W_LEAN, "stack over your wrists"],
-  ].sort((a, b) => b[0]-a[0]);
-  const cue = score >= 90 ? "locked in — hold it" : faults[0][1];
+    [dLean*W_LEAN, "stack over your wrists"],
+  ]);
+  const cue = score >= 90 ? "locked in — hold it" : faults[1];
   return { score, shoulder: shoA, hip: hipA, knee: kneA, lean, cue };
 }
 
 // STRADDLE handstand: legs are deliberately apart, so ignore leg/knee straightness
-// and score only the shoulders + the stack (hips over wrists). Same weights.
+// and score only the shoulders + the stack (hips over wrists). Same weights + deadzone.
 export function straddleHandstandScore(wri, sho, hip, kne, ank) {
   const shoA = angleAt(wri, sho, hip);
   const lean = leanFromVertical(wri, hip);
-  const dSho = 180 - shoA;
-  let score = 100 - W_SHO * dSho - W_LEAN * lean;
+  const dSho = Math.max(0, (180 - shoA) - 3);
+  const dLean = Math.max(0, lean - 2);
+  let score = 100 - W_SHO * dSho - W_LEAN * dLean;
   score = Math.max(0, Math.min(100, score));
-  const faults = [
+  const faults = worstFault([
     [dSho * W_SHO, "open your shoulders"],
-    [lean * W_LEAN, "stack hips over your wrists"],
-  ].sort((a, b) => b[0] - a[0]);
-  const cue = score >= 90 ? "clean straddle — hold it" : faults[0][1];
+    [dLean * W_LEAN, "stack hips over your wrists"],
+  ]);
+  const cue = score >= 90 ? "clean straddle — hold it" : faults[1];
   return { score, shoulder: shoA, lean, cue };
 }
 
