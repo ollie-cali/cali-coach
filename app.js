@@ -982,21 +982,28 @@ async function mirrorStart() {
 (function showcase() {
   const only = new URLSearchParams(location.search).get("only");
   if (!only || !KINDS[only]) return;
-  const apply = () => {
-    setLock(only);
-    ["pick", "sessionbtn", "historybtn"].forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
-    const b = document.createElement("div");
-    b.id = "castbanner";
-    b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
-      + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
-    b.textContent = "📺 starting CaliHome cast…";
-    document.body.appendChild(b);
-    mirrorStart()
-      .then(c => { b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`; })
-      .catch(() => { b.textContent = "📺 cast unavailable — check wifi"; });
-  };
-  // wait until the engine + camera loop are live (the splash "start" tap) so the canvas can stream
-  const t = setInterval(() => { if (typeof engine !== "undefined" && engine && !document.getElementById("splash")) { clearInterval(t); apply(); } }, 200);
+  // Lock to the one movement IMMEDIATELY (do not wait for the camera) and hide every control that
+  // could change it, so the coach opens already pinned to handstand with no picker / auto-detect.
+  const HIDE = ["pick", "sessionbtn", "historybtn", "settings"];
+  const lock = () => { try { if (locked !== only) setLock(only); } catch {} };
+  const hide = () => HIDE.forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
+  lock(); hide();
+  // Keep it locked + hidden (defend against any re-render), and start the CaliHome cast banner
+  // once the camera loop is live so the canvas actually streams.
+  let casted = false;
+  setInterval(() => {
+    lock(); hide();
+    if (!casted && !document.getElementById("splash")) {
+      casted = true;
+      const b = document.createElement("div"); b.id = "castbanner";
+      b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
+        + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
+      b.textContent = "📺 starting CaliHome cast…"; document.body.appendChild(b);
+      mirrorStart()
+        .then(c => { b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`; })
+        .catch(() => { b.textContent = "📺 cast unavailable — check wifi"; });
+    }
+  }, 400);
 })();
 
 // ================= PWA =================
