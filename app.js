@@ -553,6 +553,55 @@ function aarLoop() {
 }
 $("aar-ack").onclick = () => { aar = null; $("aar").classList.remove("show"); };
 
+// ===== canvas review (draws the debrief ON the streamed canvas so the CaliHome TABLET sees it) =====
+let review = null; const REVIEW_MS = 8500;
+function startReview(e, frames) {
+  if (e.type !== "handstand" || !frames || frames.length < 3) return false;
+  let peak = 0; for (const [, p] of frames) peak = Math.max(peak, aarScore(p).score);
+  review = { frames, secs: e.secs, avg: Math.round(e.avg), peak: Math.round(peak),
+             pointer: aarPointers(frames, "handstand")[0], t0: performance.now() };
+  say(`Held ${e.secs} seconds, form ${Math.round(e.avg)}. ${review.pointer}.`, true);
+  sfx.milestone && sfx.milestone();
+  return true;
+}
+function drawReview(now) {
+  const W = canvas.width, H = canvas.height, s = Math.min(W, H) / 720;
+  ctx.fillStyle = "#0d1014"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#161b22"; ctx.fillRect(0, 0, W, H * 0.135);
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = "#e0a73a"; ctx.font = `800 ${34 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillText("HANDSTAND · REPLAY", W / 2, 30 * s);
+  // slo-mo skeleton + alignment-line replay, fitted into the middle band
+  const boxT = H * 0.17, boxH = H * 0.5;
+  const dur = Math.max(1000, review.frames[review.frames.length - 1][0]);
+  const el = ((now - review.t0) * 0.45) % (dur + 600);
+  let f = review.frames[0]; for (const fr of review.frames) { if (fr[0] >= el) { f = fr; break; } f = fr; }
+  const p = f[1];
+  let minx = 1, maxx = 0, miny = 1, maxy = 0;
+  for (const q of p) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
+  const pad = 0.12, sw = maxx - minx || 1, sh = maxy - miny || 1, sc = Math.min(W * (1 - pad * 2) / sw, boxH / sh);
+  const ox = (W - sw * sc) / 2 - minx * sc, oy = boxT + (boxH - sh * sc) / 2 - miny * sc;
+  const X = q => q[0] * sc + ox, Y = q => q[1] * sc + oy;
+  const wr = p[4], hp = p[6], off = Math.abs(wr[0] - hp[0]);
+  ctx.setLineDash([12, 9]); ctx.lineWidth = 3 * s; ctx.strokeStyle = off < 0.05 ? "#4cae6a" : off < 0.11 ? "#d29922" : "#f0564b";
+  ctx.beginPath(); ctx.moveTo(X(wr), Y(wr)); ctx.lineTo(X(wr), boxT - H * 0.01); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = "#e9eef3"; ctx.lineWidth = Math.max(3, W * 0.011); ctx.lineCap = "round";
+  for (const [a, b] of AAR_SKEL) { ctx.beginPath(); ctx.moveTo(X(p[a]), Y(p[a])); ctx.lineTo(X(p[b]), Y(p[b])); ctx.stroke(); }
+  ctx.fillStyle = "#e0a73a"; for (const q of p) { ctx.beginPath(); ctx.arc(X(q), Y(q), Math.max(4, W * 0.007), 0, 7); ctx.fill(); }
+  // score + stats + the one thing to work on
+  const by = boxT + boxH + H * 0.02;
+  ctx.fillStyle = scoreCol(review.avg); ctx.font = `800 ${118 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.shadowColor = "#000"; ctx.shadowBlur = 16 * s; ctx.fillText(String(review.avg), W / 2, by); ctx.shadowBlur = 0;
+  ctx.fillStyle = "#9aa4ad"; ctx.font = `700 ${19 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillText(`FORM   ·   peak ${review.peak}   ·   held ${review.secs}s`, W / 2, by + 122 * s);
+  ctx.fillStyle = "#e9eef3"; ctx.font = `700 ${25 * s}px -apple-system,system-ui,sans-serif`;
+  ctx.fillText("Work on:  " + review.pointer, W / 2, by + 156 * s);
+  ctx.textAlign = "left";
+  const prog = Math.min(1, (now - review.t0) / REVIEW_MS);
+  ctx.fillStyle = "#e0a73a"; ctx.fillRect(0, H - 6 * s, W * (1 - prog), 6 * s);
+}
+try { canvas.addEventListener("click", () => { if (review) review = null; }); } catch {}
+
 // ================= daily move =================
 const KIND_ORDER = ["handstand", "pushups", "squats", "plank", "lsit", "pullups", "pike", "bridge", "front_lever"];
 const dailyKind = KIND_ORDER[Math.floor(Date.now() / 86400000) % KIND_ORDER.length];
@@ -602,6 +651,10 @@ function ghostLine(lm) {
 function loop() {
   requestAnimationFrame(loop);
   if (!landmarker || video.readyState < 2) return;
+  if (review) {                                   // handstand debrief on the streamed canvas -> tablet sees it
+    if (performance.now() - review.t0 < REVIEW_MS) { drawReview(performance.now()); return; }
+    review = null;
+  }
   ctx.save();
   if (mirrored) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -641,7 +694,10 @@ function loop() {
     dailyTick(e);
     duelTick(e);
     journalAdd(e);
-    showReport(e, aarFrames);                 // skill debrief + instant replay (hold kinds only)
+    // handstand + a tablet watching (showcase/mirror) -> draw the debrief ON the canvas so it streams;
+    // otherwise the phone's DOM overlay. Both give score + slo-mo replay + what to work on.
+    if ((CLEAN || mirrorPeer) && e.type === "handstand" && startReview(e, aarFrames)) { /* canvas review streams to the tablet */ }
+    else showReport(e, aarFrames);            // skill debrief + instant replay (hold kinds only)
     // voice: reps announced here; holds are spoken inside showReport
     if (!e.pb && !HOLD_KINDS.includes(e.type)) say(`${prevReps} reps, average ${Math.round(e.avg)}`, true);
   }
