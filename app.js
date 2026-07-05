@@ -727,7 +727,7 @@ function renderSettings() {
       <button class="${tiltOn ? "gold" : "sec"}" style="margin-top:8px" id="tilttoggle">${tiltOn ? "Auto-level ON" : "Auto-level OFF"}</button></div>
     <div class="item">🛹 CaliHome board — <button class="sec" style="width:auto;padding:8px 14px" id="boardbtn">${board.dev ? "connected ✓" : "Connect board"}</button>
       <span style="color:var(--sub);font-size:13px"> live base-stability fuses with the camera score; the board glows your form colour</span></div>
-    <div class="item">📺 Mirror to a screen — prop any phone/tablet on the board, open <b>mirror.html</b> on it, enter the code:
+    <div class="item">📺 Mirror to a screen — on the CaliHome screen (or any phone/tablet on <b>calihome.html</b>) enter this code once; it remembers it and auto-connects after:
       <div id="mirrorrow" style="margin-top:8px"><button class="sec" id="mirrorbtn">Get mirror code</button></div></div>
     <div class="item">👻 Ghost — race a translucent replay of your best hold
       <button class="${ghostOn ? "gold" : "sec"}" style="margin-top:8px" id="ghosttoggle">${ghostOn ? "Ghost ON" : "Ghost OFF"}</button></div>
@@ -946,16 +946,25 @@ async function mirrorStart() {
     s.src = "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js";
     s.onload = res; s.onerror = rej; document.head.appendChild(s);
   });
-  mirrorCode = Array.from({ length: 4 }, () => "ABCDEFGHJKMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 31)]).join("");
-  mirrorPeer = new Peer("cali-" + mirrorCode);
+  const rnd = () => Array.from({ length: 4 }, () => "ABCDEFGHJKMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 31)]).join("");
+  // STABLE code: reuse this phone's saved code so a paired CaliHome tablet auto-reconnects for good.
+  mirrorCode = localStorage.getItem("caliMirrorCode") || rnd();
+  localStorage.setItem("caliMirrorCode", mirrorCode);
   canvasStream ||= canvas.captureStream(30);
-  mirrorPeer.on("connection", conn => {
-    conn.on("data", () => {                            // mirror-hello -> call back with the canvas
-      mirrorPeer.call(conn.peer, canvasStream);
-      say("mirror connected", true);
+  const wire = code => {
+    mirrorPeer = new Peer("cali-" + code);
+    mirrorPeer.on("connection", conn => {
+      conn.on("data", () => {                          // mirror-hello -> call back with the canvas
+        mirrorPeer.call(conn.peer, canvasStream);
+        say("mirror connected", true);
+      });
     });
-  });
-  return new Promise(res => mirrorPeer.on("open", () => res(mirrorCode)));
+    mirrorPeer.on("error", e => {                       // saved id already held on the broker -> fresh one
+      if (e.type === "unavailable-id") { mirrorCode = rnd(); localStorage.setItem("caliMirrorCode", mirrorCode); mirrorPeer = null; wire(mirrorCode); }
+    });
+  };
+  wire(mirrorCode);
+  return new Promise(res => { const t = setInterval(() => { if (mirrorPeer && mirrorPeer.open) { clearInterval(t); res(mirrorCode); } }, 120); });
 }
 
 // ================= PWA =================
