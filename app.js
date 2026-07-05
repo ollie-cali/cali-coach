@@ -161,24 +161,32 @@ function pill(text, cx, y, font, fg, bg = "#0d1014b8") {
   ctx.fillStyle = bg; roundRect(cx - w / 2 - 16, y - 8, w + 32, parseInt(font) * 1.7, 14); ctx.fill();
   ctx.fillStyle = fg; ctx.fillText(text, cx - w / 2, y);
 }
+let CLEAN = false;   // showcase mode: strip all chrome (branding, mode bar, guide, toast, daily) — just the person, skeleton, alignment line + score
 function paintHUD(out, guide) {
   const W = canvas.width, H = canvas.height, s = Math.min(W, H) / 720;
   ctx.save(); ctx.textBaseline = "top";
-  ctx.font = `800 ${28 * s}px -apple-system,system-ui,sans-serif`;
-  ctx.fillStyle = "#ffffffd9"; ctx.fillText("CALI", 24 * s, 22 * s);
-  ctx.fillStyle = "#e0a73a"; ctx.fillText("COACH", 24 * s + ctx.measureText("CALI ").width, 22 * s);
-  ctx.font = `700 ${13 * s}px -apple-system,system-ui,sans-serif`;
-  ctx.fillStyle = "#4cae6a"; ctx.fillText("✓ VERIFIED · scored live on-device", 24 * s, 54 * s);
-  ctx.font = `700 ${14 * s}px -apple-system,system-ui,sans-serif`;
-  ctx.fillStyle = dailyDoneToday() ? "#4cae6a" : "#e0a73a";
-  ctx.fillText(`☀ Daily: ${NAMES[dailyKind] || dailyKind}${dailyDoneToday() ? " ✓" : ""}`, 24 * s, 76 * s);
-  const bits = [out.mode];
-  if (out.holdSecs != null) bits.push(out.holdSecs.toFixed(1) + "s");
-  if (out.reps != null) bits.push(out.reps + " reps");
-  if (duel.on) bits.push(`⚔ ${duel.turn}`);
-  if (board.dev && board.liveStab != null && out.mode === "HANDSTAND") bits.push(`base ${board.liveStab}`);
-  pill(bits.join("  ·  "), W / 2, 26 * s, `700 ${22 * s}px -apple-system,system-ui,sans-serif`, "#e9eef3");
-  if (guide) pill(guide, W / 2, H * 0.62, `700 ${26 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a");
+  if (!CLEAN) {
+    ctx.font = `800 ${28 * s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillStyle = "#ffffffd9"; ctx.fillText("CALI", 24 * s, 22 * s);
+    ctx.fillStyle = "#e0a73a"; ctx.fillText("COACH", 24 * s + ctx.measureText("CALI ").width, 22 * s);
+    ctx.font = `700 ${13 * s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillStyle = "#4cae6a"; ctx.fillText("✓ VERIFIED · scored live on-device", 24 * s, 54 * s);
+    ctx.font = `700 ${14 * s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillStyle = dailyDoneToday() ? "#4cae6a" : "#e0a73a";
+    ctx.fillText(`☀ Daily: ${NAMES[dailyKind] || dailyKind}${dailyDoneToday() ? " ✓" : ""}`, 24 * s, 76 * s);
+    const bits = [out.mode];
+    if (out.holdSecs != null) bits.push(out.holdSecs.toFixed(1) + "s");
+    if (out.reps != null) bits.push(out.reps + " reps");
+    if (duel.on) bits.push(`⚔ ${duel.turn}`);
+    if (board.dev && board.liveStab != null && out.mode === "HANDSTAND") bits.push(`base ${board.liveStab}`);
+    pill(bits.join("  ·  "), W / 2, 26 * s, `700 ${22 * s}px -apple-system,system-ui,sans-serif`, "#e9eef3");
+    if (guide) pill(guide, W / 2, H * 0.62, `700 ${26 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a");
+  } else if (out.holdSecs != null) {
+    // clean mode: just the quiet hold timer, no pill / no black bar
+    ctx.font = `800 ${30 * s}px -apple-system,system-ui,sans-serif`;
+    ctx.fillStyle = "#e9eef3"; ctx.shadowColor = "#000"; ctx.shadowBlur = 12 * s;
+    ctx.fillText(out.holdSecs.toFixed(1) + "s", 26 * s, 24 * s); ctx.shadowBlur = 0;
+  }
   if (out.score != null) {
     ctx.font = `800 ${110 * s}px -apple-system,system-ui,sans-serif`;
     ctx.fillStyle = scoreCol(out.score);
@@ -186,9 +194,9 @@ function paintHUD(out, guide) {
     ctx.fillText(String(Math.round(out.score)), 26 * s, H - 150 * s);
     ctx.shadowBlur = 0;
   }
-  if (lastCue) pill(lastCue, W / 2, H - 52 * s, `700 ${24 * s}px -apple-system,system-ui,sans-serif`, "#e9eef3");
+  if (!CLEAN && lastCue) pill(lastCue, W / 2, H - 52 * s, `700 ${24 * s}px -apple-system,system-ui,sans-serif`, "#e9eef3");
   const now = performance.now();
-  if (toast && now < toast.until) {
+  if (!CLEAN && toast && now < toast.until) {
     ctx.globalAlpha = Math.min(1, (toast.until - now) / 400);
     pill("● " + toast.text, W / 2, H * 0.40, `800 ${44 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a", "#0d1014d9");
     ctx.globalAlpha = 1;
@@ -613,13 +621,13 @@ function loop() {
   if (out.cue) say(out.cue);
   if (lm) draw(lm, out.mode === "HANDSTAND" ? scoreCol(out.score ?? 50) : (MODE_COL[out.mode] || "#9aa4ad"));
   if (lm && out.mode === "HANDSTAND") ghostLine(lm);
+  ctx.restore();                 // undo the mirror BEFORE any text, so words never render flipped
   shotTick(lm, out, now);
   ghostTick(lm, out, now);
   boardScoreTick(out, now);
   paintHUD(out, guide);
   paintDebug(lm, out);
   paintParty(now);
-  ctx.restore();
   recTick(out);
 
   if (session.length > announced) {
@@ -982,6 +990,9 @@ async function mirrorStart() {
 (function showcase() {
   const only = new URLSearchParams(location.search).get("only");
   if (!only || !KINDS[only]) return;
+  CLEAN = true;                                   // strip all HUD chrome for the showcase
+  voiceOn = true; localStorage.setItem("caliVoice", "true");   // voice coach ON automatically
+  try { $("voice").textContent = "🔊"; } catch {}
   // Lock to the one movement IMMEDIATELY (do not wait for the camera) and hide every control that
   // could change it, so the coach opens already pinned to handstand with no picker / auto-detect.
   const HIDE = ["pick", "sessionbtn", "historybtn", "settings"];
