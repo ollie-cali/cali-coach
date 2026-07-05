@@ -1,0 +1,201 @@
+<!doctype html>
+<!-- ============================================================================
+     CALI SIGNAGE — the 55" gym-wall loop. Landscape 16:9, self-rotating, zero
+     interaction. Drive it from a Fire Stick / Android TV / Pi in browser kiosk
+     mode pointed at this URL. Slides: next class + countdown, this week's PBs,
+     handstand leaderboard, the Academy (QR), the gear/brand. Onyx/Bone/Amber/Gold.
+     Edit CONFIG (below) to change the content. ?slide=N forces one slide.
+============================================================================ -->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cali · Wall</title>
+<style>
+  :root{ --onyx:#1A1A1E; --bone:#ECE7DB; --amber:#F2B208; --gold:#C6A02C; --crimson:#D22F2A; --sub:#8b8778; --panel:#22221c; }
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%;overflow:hidden;background:var(--onyx);color:var(--bone);
+    font-family:"Helvetica Neue",Arial,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  /* everything scales off the viewport so 1080p and 4K both look right */
+  .wrap{position:fixed;inset:0;display:flex;flex-direction:column}
+  #bg{position:fixed;inset:0;background:radial-gradient(120% 100% at 80% 10%, #26261c 0%, #1A1A1E 55%, #0e0e10 100%);z-index:-2}
+  .spark{position:fixed;border-radius:50%;background:var(--gold);opacity:.16;z-index:-1;animation:drift linear infinite}
+  @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-14vh)}}
+
+  header{display:flex;align-items:center;justify-content:space-between;padding:2.4vh 3.2vw 0}
+  .mark{font-weight:900;letter-spacing:.14em;font-size:3.4vh}
+  .mark b{color:var(--amber)}
+  .mark i{display:inline-block;width:1vh;height:1vh;border-radius:50%;background:var(--amber);margin-left:.9vh;vertical-align:middle}
+  .clock{text-align:right;font-variant-numeric:tabular-nums}
+  .clock .t{font-weight:800;font-size:3.2vh;letter-spacing:.02em}
+  .clock .d{color:var(--sub);font-size:1.5vh;letter-spacing:.28em;text-transform:uppercase;margin-top:.3vh}
+
+  .stage{flex:1;position:relative}
+  .slide{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:0 6vw 4vh;
+    opacity:0;transform:translateY(3vh);transition:opacity .8s ease,transform .8s ease;pointer-events:none}
+  .slide.on{opacity:1;transform:none}
+  .eyebrow{color:var(--amber);letter-spacing:.4em;text-transform:uppercase;font-weight:800;font-size:2.1vh;margin-bottom:2vh}
+  h1{font-weight:900;letter-spacing:.01em;line-height:.98;font-size:9.5vh;text-wrap:balance}
+  h1 span{color:var(--amber)}
+  .big{font-weight:900;font-size:15vh;line-height:.9;font-variant-numeric:tabular-nums;color:var(--bone)}
+  .sub{color:var(--sub);font-size:2.8vh;margin-top:2vh;font-weight:500}
+
+  /* schedule */
+  .sched{display:flex;flex-direction:column;gap:1.3vh;margin-top:3vh;max-width:60vw}
+  .row{display:flex;align-items:baseline;gap:2.4vw;font-size:3.1vh}
+  .row .tm{font-weight:800;color:var(--amber);width:12vw;font-variant-numeric:tabular-nums}
+  .row .nm{font-weight:600}
+  .row .free{color:var(--gold);font-size:1.9vh;letter-spacing:.2em;text-transform:uppercase;font-weight:800;margin-left:1vw}
+  .row.past{opacity:.32}
+
+  /* PB cards */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2.2vh;margin-top:3vh}
+  .card{background:var(--panel);border-radius:1.6vh;padding:3vh 2.4vw;border-left:.7vh solid var(--amber);position:relative}
+  .card .nm{font-weight:800;font-size:3.4vh}
+  .card .ft{color:var(--bone);font-size:2.5vh;margin-top:.6vh;opacity:.85}
+  .card .pb{position:absolute;top:2vh;right:1.6vw;color:var(--gold);font-weight:800;letter-spacing:.18em;font-size:1.7vh}
+
+  /* leaderboard */
+  .board{display:flex;flex-direction:column;gap:1.5vh;margin-top:3vh;max-width:70vw}
+  .lb{display:flex;align-items:center;gap:2.2vw;font-size:4.2vh}
+  .lb .rk{font-weight:900;color:var(--sub);width:4vw;font-variant-numeric:tabular-nums}
+  .lb .dot{width:2vh;height:2vh;border-radius:50%;flex:0 0 auto}
+  .lb .nm{font-weight:700;flex:1}
+  .lb .vl{font-weight:900;font-variant-numeric:tabular-nums;color:var(--amber)}
+  .lb:first-child .vl{color:var(--gold)}
+
+  /* academy / QR */
+  .qrrow{display:flex;align-items:center;gap:4vw;margin-top:3vh}
+  .qrrow img{width:26vh;height:auto;background:var(--bone);border-radius:1.6vh;padding:1.4vh}
+  .qrrow .cap{color:var(--gold);letter-spacing:.18em;text-transform:uppercase;font-weight:800;font-size:2vh;margin-top:1.4vh;text-align:center}
+
+  /* belt ladder */
+  .belts{display:flex;gap:1.4vw;margin-top:4vh;align-items:center}
+  .belt{width:5.2vh;height:5.2vh;border-radius:50%;box-shadow:0 0 0 .4vh #0004 inset}
+
+  footer{display:flex;align-items:center;justify-content:space-between;padding:0 3.2vw 2.6vh}
+  .dots{display:flex;gap:1.1vw}
+  .dots b{width:1.3vh;height:1.3vh;border-radius:50%;background:#ffffff26;transition:background .4s,width .4s;border-radius:1vh}
+  .dots b.on{background:var(--amber);width:4vh}
+  .url{color:var(--sub);letter-spacing:.34em;text-transform:uppercase;font-size:1.6vh;font-weight:700}
+</style></head><body>
+<div id="bg"></div>
+<div class="wrap">
+  <header>
+    <div class="mark">CALI<b>UNITY</b><i></i></div>
+    <div class="clock"><div class="t" id="clk">--:--</div><div class="d" id="dat"></div></div>
+  </header>
+  <div class="stage" id="stage"></div>
+  <footer>
+    <div class="dots" id="dots"></div>
+    <div class="url">caliunity.com</div>
+  </footer>
+</div>
+
+<script>
+// ============ EDIT ME: the content ============
+const CONFIG = {
+  classes: [
+    { t: "07:00", name: "Daily Live", free: true },
+    { t: "12:30", name: "Handstand Skills" },
+    { t: "17:30", name: "Pull Strength" },
+    { t: "19:00", name: "Open Mat" },
+  ],
+  pbs: [
+    { nm: "Sarah M.", ft: "45s handstand", belt: "#F2B208" },
+    { nm: "Tom R.",   ft: "first muscle-up", belt: "#1E9E63" },
+    { nm: "Priya K.", ft: "90s L-sit", belt: "#2C6BD1" },
+    { nm: "Dan W.",   ft: "straddle press", belt: "#7C3FB4" },
+    { nm: "Mel H.",   ft: "1:20 hollow hold", belt: "#E27127" },
+    { nm: "Josh B.",  ft: "first pistol squat", belt: "#D22F2A" },
+  ],
+  board: [
+    { nm: "Harvey C.", vl: "2:14", belt: "#D22F2A" },
+    { nm: "Aisha N.",  vl: "1:47", belt: "#7C3FB4" },
+    { nm: "Leo F.",    vl: "1:31", belt: "#2C6BD1" },
+    { nm: "Grace P.",  vl: "1:08", belt: "#1E9E63" },
+    { nm: "Sam T.",    vl: "0:52", belt: "#F2B208" },
+  ],
+  beltLadder: ["#ECE7DB","#F2B208","#E27127","#1E9E63","#2C6BD1","#7C3FB4","#8A5A2E","#D22F2A","#C6A02C"],
+  qrJoin: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASIAAAEiCAIAAADS3EjhAAAE/klEQVR4nO3du20cSRRAUVJQPONsCIpbIazTLgOgwyDWpdWAULpbnz7Hn57pnrkoAnyoev/6/HgDSj/SqwMyg/+D1QxyMoOczCAnM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHI/R178+ufX21muf3+/neX+O7q/3+61T/ttWM0gJzPIyQxyMoOczCAnM8jJDHIyg5zMYO0pkB0nKkamE2ZNVIx8qjVdx/027lnNICczyMkMcjKDnMwgJzPIyQxyMoOczGDnKZBZ/3Ffc8KgexrdBMmsJ/k67rdhNYOczCAnM8jJDHIyg5zMICczyMkMcjKDc6dA+FvWnOTgO6sZ5GQGOZlBTmaQkxnkZAY5mUFOZpCTGeRMgfyB7syXWZMca36q81jNICczyMkMcjKDnMwgJzPIyQxyMoOczODcKZDzZghmTVR0V571HV3H/TasZpCTGeRkBjmZQU5mkJMZ5GQGOZlBTmaw8xTI/XTCjmbtjTFrl5FZkyvnsZpBTmaQkxnkZAY5mUFOZpCTGeRkBjmZwdpTIOft2TDC+Snf+W18ZzWDnMwgJzPIyQxyMoOczCAnM8jJDHIyg9z71+fHo+Ye1twb42k7Z1xL7iPSfYNWM8jJDHIyg5zMICczyMkMcjKDnMwgJzNYewqks+Osxr0dT1d52lzLZQoE9uWPRsjJDHIyg5zMICczyMkMcjKDnMzg3CmQNffVGJkveZo1n9WVfaqR36TVDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyP3fc36LbC2TNGZFZT3LkyveuJd+3+watZpCTGeRkBjmZQU5mkJMZ5GQGOZlBTmbw1L1A7j1tF4qR9x0xaybmOu7UHqsZ5GQGOZlBTmaQkxnkZAY5mUFOZpCTGZy7F8iaMxMj77vm3hjnPecdzyGymkFOZpCTGeRkBjmZQU5mkJMZ5GQGOZnB2lMgnTVnNUbM2jlj1pXXPPPlnr1AYGP+aISczCAnM8jJDHIyg5zMICczyMkMzp0C6fYROW8niZErrzkj0l15zZ1RrGaQkxnkZAY5mUFOZpCTGeRkBjmZQU5m8NS9QNbcsWPHO3rauS2vSfuI3LOaQU5mkJMZ5GQGOZlBTmaQkxnIDPZnNYPc+9fnR/8uh1jzpJJZ7ztrYuaatBPMCKsZ5GQGOZlBTmaQkxnkZAY5mUFOZpCTGay9F8ia+1uMGDmJZuRpnDf3sOMdvbLPbDWDnMwgJzPIyQxyMoOczCAnM8jJDHIyg51PhNnxP/2z7nfWKSdrPo3OrLklqxnkZAY5mUFOZpCTGeRkBjmZQU5mkJMZ7DwFcu9p8wedWXMea+4E81ryU1nNICczyMkMcjKDnMwgJzPIyQxyMoOczODcKZCnGTlt5Ly5liu7o1kzMfesZpCTGeRkBjmZQU5mkJMZ5GQGOZlBTmaQMwXy14xMGHRnvpw3QfLa8HwcqxnkZAY5mUFOZpCTGeRkBjmZQU5mkJMZnDsFct50QjdhMPKs1jx55zXpacxiNYOczCAnM8jJDHIyg5zMICczyMkMcjKDnadAZp2+0XnaREW3u8mV3e+aMyJWM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIvX99fvTvAo9mNYOczCAnM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHIyg5zMICczeKv9B3pjdUvc00ScAAAAAElFTkSuQmCC",
+  dwellMs: 12000,
+};
+// ==============================================
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+const mins = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+
+// live clock
+function tick() {
+  const d = new Date();
+  $("clk").textContent = pad(d.getHours()) + ":" + pad(d.getMinutes());
+  $("dat").textContent = d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+}
+setInterval(tick, 1000); tick();
+
+// countdown to the next class
+function nextClass() {
+  const now = new Date(); const nowMin = now.getHours() * 60 + now.getMinutes();
+  const upcoming = CONFIG.classes.filter(c => mins(c.t) > nowMin).sort((a, b) => mins(a.t) - mins(b.t));
+  const c = upcoming[0] || CONFIG.classes[0];
+  let diff = mins(c.t) - nowMin; if (diff <= 0) diff += 24 * 60;
+  return { c, h: Math.floor(diff / 60), m: diff % 60 };
+}
+
+// ---- slide renderers ----
+const slides = [
+  () => { const n = nextClass(); const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    return `<div class="eyebrow">Today at Cali</div>
+      <div class="sub" style="margin:0 0 1vh;color:var(--bone);font-size:3vh;font-weight:700">Next up</div>
+      <h1>${n.c.name}${n.c.free ? ' <span style="font-size:5vh;color:var(--gold)">· free</span>' : ""}</h1>
+      <div class="big" style="margin-top:2vh;color:var(--amber)">${n.h ? n.h + "h " : ""}${pad(n.m)}<span style="font-size:5vh;color:var(--sub)"> min</span></div>
+      <div class="sched">${CONFIG.classes.map(c => `<div class="row ${mins(c.t) < nowMin ? "past" : ""}">
+        <span class="tm">${c.t}</span><span class="nm">${c.name}</span>${c.free ? '<span class="free">free</span>' : ""}</div>`).join("")}</div>`; },
+
+  () => `<div class="eyebrow">This week's PBs</div>
+    <h1 style="font-size:7vh;margin-bottom:1vh">The wall of <span>wins</span></h1>
+    <div class="grid">${CONFIG.pbs.map(p => `<div class="card" style="border-left-color:${p.belt}">
+      <span class="pb">★ PB</span><div class="nm">${p.nm}</div><div class="ft">${p.ft}</div></div>`).join("")}</div>`,
+
+  () => `<div class="eyebrow">Handstand hold · leaderboard</div>
+    <h1 style="font-size:7vh;margin-bottom:1vh">Who's <span>upside down</span> the longest</h1>
+    <div class="board">${CONFIG.board.map((b, i) => `<div class="lb">
+      <span class="rk">${i + 1}</span><span class="dot" style="background:${b.belt}"></span>
+      <span class="nm">${b.nm}</span><span class="vl">${b.vl}</span></div>`).join("")}</div>`,
+
+  () => `<div class="eyebrow">Turn your passion into a career</div>
+    <h1>Become a <span>qualified coach</span></h1>
+    <div class="sub" style="font-size:3.2vh">12 weeks · train from anywhere · we did it, so can you</div>
+    <div class="qrrow"><div><img src="${CONFIG.qrJoin}" alt="scan"><div class="cap">Scan to start</div></div>
+      <div class="sub" style="font-size:3.4vh;max-width:38vw;color:var(--bone)">
+        From a job you hate to changing lives for a living. The Cali Academy makes Cali-standard coaches.</div></div>`,
+
+  () => `<div class="eyebrow">Made by the gym that coaches it</div>
+    <h1>One ladder.<br><span>Every skill.</span></h1>
+    <div class="sub" style="font-size:3.2vh">Parallettes · rings · the CaliHome handstand mirror · earn your colour</div>
+    <div class="belts">${CONFIG.beltLadder.map(c => `<div class="belt" style="background:${c}"></div>`).join("")}</div>`,
+];
+
+// ---- rotator ----
+const stage = $("stage"), dots = $("dots");
+const els = slides.map(() => { const d = document.createElement("div"); d.className = "slide"; stage.appendChild(d); return d; });
+slides.forEach(() => { const b = document.createElement("b"); dots.appendChild(b); });
+const dotEls = [...dots.children];
+let cur = -1;
+function show(i) {
+  els[cur]?.classList.remove("on"); dotEls[cur]?.classList.remove("on");
+  cur = i; els[i].innerHTML = slides[i](); els[i].classList.add("on"); dotEls[i].classList.add("on");
+}
+const forced = new URLSearchParams(location.search).get("slide");
+if (forced != null) { show(Math.max(0, Math.min(slides.length - 1, +forced))); }
+else { show(0); setInterval(() => show((cur + 1) % slides.length), CONFIG.dwellMs); }
+
+// ambient sparks (light: a handful of slow gold dots)
+for (let i = 0; i < 14; i++) {
+  const s = document.createElement("div"); s.className = "spark";
+  const sz = 0.4 + (i % 4) * 0.5;
+  s.style.width = s.style.height = sz + "vh";
+  s.style.left = ((i * 67) % 100) + "vw"; s.style.top = (10 + (i * 37) % 80) + "vh";
+  s.style.animationDuration = (16 + (i % 6) * 4) + "s"; s.style.animationDelay = "-" + (i * 2) + "s";
+  document.body.appendChild(s);
+}
+</script></body></html>
