@@ -204,6 +204,78 @@ function paintHUD(out, guide) {
   ctx.restore();
 }
 
+
+// ================= form goggles: director's view + L/R balance (est.) =================
+// Today's session (9 Jul): the "form goggles" overlay — a circular POV of the athlete's FACE
+// (rotated upright while they're inverted) + a camera-ESTIMATED left/right loading bar (the
+// pre-hardware stand-in for the CaliHome heat map). Paints on the canvas -> recordings, PB
+// clips and the tablet cast all get it for free. Handstand mode only. Defensive by design.
+let _balEMA = null;
+function paintGoggles(lm, out) {
+  if (!lm || out.mode !== "HANDSTAND") { _balEMA = null; return; }
+  const W = canvas.width, H = canvas.height, s = Math.min(W, H) / 720;
+  const SX = p => (mirrored ? (1 - p.x) : p.x) * W, SY = p => p.y * H;
+  const vis = i => (lm[i]?.visibility ?? 0) > 0.4;
+
+  // ---- director's view: circular face PiP, top-right, rotated so the face reads upright ----
+  try {
+    if (vis(0)) {
+      const nx = SX(lm[0]), ny = SY(lm[0]);
+      let hr = 0.05 * H;
+      if (vis(7) && vis(8)) hr = Math.max(hr, Math.hypot(SX(lm[7]) - SX(lm[8]), SY(lm[7]) - SY(lm[8])) * 1.35);
+      else if (vis(2) && vis(5)) hr = Math.max(hr, Math.hypot(SX(lm[2]) - SX(lm[5]), SY(lm[2]) - SY(lm[5])) * 2.2);
+      const sx = Math.max(0, nx - hr), sy = Math.max(0, ny - hr);
+      const sw = Math.min(2 * hr, W - sx), sh = Math.min(2 * hr, H - sy);
+      const R = 0.10 * Math.min(W, H), cx = W - R - 20 * s, cy = R + 24 * s;
+      if (sw > 8 && sh > 8 && (Math.abs(cx - nx) > R + hr || Math.abs(cy - ny) > R + hr)) {
+        ctx.save();
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.clip();
+        ctx.translate(cx, cy); ctx.rotate(Math.PI);          // inverted athlete -> upright face
+        ctx.drawImage(canvas, sx, sy, sw, sh, -R, -R, 2 * R, 2 * R);
+        ctx.restore();
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7);
+        ctx.lineWidth = 4 * s; ctx.strokeStyle = scoreCol(out.score ?? 50); ctx.stroke();
+        ctx.font = `800 ${11 * s}px -apple-system,system-ui,sans-serif`;
+        ctx.fillStyle = "#e9eef3"; ctx.shadowColor = "#000"; ctx.shadowBlur = 6 * s;
+        const t = "DIRECTOR'S VIEW";
+        ctx.fillText(t, cx - ctx.measureText(t).width / 2, cy + R + 8 * s);
+        ctx.shadowBlur = 0;
+      }
+    }
+  } catch {}
+
+  // ---- L/R balance bar (camera-estimated: body line position between the wrist bases) ----
+  try {
+    if (vis(15) && vis(16) && vis(11) && vis(12) && vis(23) && vis(24)) {
+      const w1 = SX(lm[15]), w2 = SX(lm[16]);
+      const span = Math.abs(w1 - w2);
+      if (span > 0.06 * W) {
+        const mid = (w1 + w2) / 2;
+        const com = (SX(lm[11]) + SX(lm[12]) + SX(lm[23]) + SX(lm[24])) / 4;
+        let pctL = Math.max(0, Math.min(100, ((mid - com) / span + 0.5) * 100));
+        _balEMA = _balEMA == null ? pctL : _balEMA + 0.25 * (pctL - _balEMA);
+        pctL = _balEMA;
+        const bw = 0.44 * W, bh = 12 * s, bx = (W - bw) / 2, by = H - 100 * s;
+        const diff = Math.abs(pctL - 50);
+        const heavy = diff < 8 ? "#4cae6a" : diff < 20 ? "#e0a73a" : "#f0564b";
+        ctx.save();
+        ctx.fillStyle = "#0d1014b8"; roundRect(bx - 6 * s, by - 6 * s, bw + 12 * s, bh + 12 * s, 8 * s); ctx.fill();
+        ctx.fillStyle = pctL >= 50 ? heavy : "#3a4048"; ctx.fillRect(bx, by, bw * pctL / 100, bh);
+        ctx.fillStyle = pctL < 50 ? heavy : "#3a4048"; ctx.fillRect(bx + bw * pctL / 100, by, bw * (100 - pctL) / 100, bh);
+        ctx.fillStyle = "#e9eef3"; ctx.fillRect(bx + bw / 2 - 1, by - 3 * s, 2, bh + 6 * s);
+        ctx.font = `800 ${15 * s}px -apple-system,system-ui,sans-serif`;
+        ctx.textBaseline = "middle";
+        ctx.fillText(`L ${Math.round(pctL)}`, bx - 46 * s, by + bh / 2);
+        ctx.fillText(`${Math.round(100 - pctL)} R`, bx + bw + 10 * s, by + bh / 2);
+        ctx.font = `700 ${10 * s}px -apple-system,system-ui,sans-serif`;
+        ctx.fillStyle = "#9aa4ad";
+        ctx.fillText("BALANCE (est)", bx + bw / 2 - 34 * s, by - 14 * s);
+        ctx.restore();
+      }
+    } else _balEMA = null;
+  } catch {}
+}
+
 // ================= confetti + PB =================
 let particles = [], banner = null;
 function celebrate(text) {
@@ -738,6 +810,7 @@ function loop() {
   ghostTick(lm, out, now);
   boardScoreTick(out, now);
   paintHUD(out, guide);
+  try { paintGoggles(lm, out); } catch {}
   paintDebug(lm, out);
   paintParty(now);
   recTick(out);
