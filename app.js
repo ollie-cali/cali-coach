@@ -1207,26 +1207,43 @@ const ICE_CFG = { config: { iceServers: [
     if (sp) sp.textContent = "Allow the camera, prop your phone side-on, kick up. You'll appear on the CaliHome screen.";
     const h1 = document.querySelector("#splash h1"); if (h1) h1.innerHTML = "CALI<b>HOME</b>";
   }catch{}
-  const HIDE = ["pick", "sessionbtn", "historybtn", "settings"];
+  const HIDE = ["pick", "sessionbtn", "historybtn", "settings", "sub"];
   const lock = () => { try { if (locked !== only) setLock(only); } catch {} };
   const hide = () => HIDE.forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
   lock(); hide();
   // Keep it locked + hidden (defend against any re-render), and start the CaliHome cast banner
   // once the camera loop is live so the canvas actually streams.
+  const CAST0 = new URLSearchParams(location.search).get("cast");
+  if (CAST0) {
+    const b = document.createElement("div"); b.id = "castbanner";
+    b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
+      + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
+    b.textContent = "📺 finding your CaliHome screen…"; document.body.appendChild(b);
+    linkCast(CAST0.toUpperCase(), b);          // WARM: signalling connects while they read the splash
+  }
   let casted = false;
   setInterval(() => {
     lock(); hide();
     if (!casted && !document.getElementById("splash")) {
       casted = true;
-      const b = document.createElement("div"); b.id = "castbanner";
-      b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
-        + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
-      b.textContent = "📺 starting CaliHome cast…"; document.body.appendChild(b);
-      const CAST = new URLSearchParams(location.search).get("cast");
-      if (CAST) { b.textContent = "📺 connecting to CaliHome…"; linkCast(CAST.toUpperCase(), b); }
-      else mirrorStart()
-        .then(c => { b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`; })
-        .catch(() => { b.textContent = "📺 cast unavailable — check wifi"; });
+      if (CAST0 && window.castLink) {
+        const b = document.getElementById("castbanner");
+        if (b) b.textContent = "📺 connecting to CaliHome…";
+        canvasStream ||= canvas.captureStream(30);
+        castLink.attach(canvasStream);
+        setTimeout(() => {                    // classic PeerJS fallback if the link never lands
+          const bb = document.getElementById("castbanner");
+          if (bb && !bb.innerHTML.includes("connected")) mirrorStart().then(c => pushCast(CAST0.toUpperCase(), bb, c)).catch(() => {});
+        }, 18000);
+      } else {
+        const b = document.createElement("div"); b.id = "castbanner";
+        b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
+          + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
+        b.textContent = "📺 starting CaliHome cast…"; document.body.appendChild(b);
+        mirrorStart()
+          .then(c => { b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`; })
+          .catch(() => { b.textContent = "📺 cast unavailable — check wifi"; });
+      }
     }
   }, 400);
 })();
@@ -1266,7 +1283,7 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v32 · 09 Jul 21:10";
+  vd.textContent = "v33 · 09 Jul 21:45";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}
@@ -1278,19 +1295,15 @@ async function linkCast(room, banner){
   try{
     await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2");
     await loadScript("calilink.js");
-    canvasStream ||= canvas.captureStream(30);
-    window.castLink = CaliLink.cast(room, canvasStream, { onTrack: s => {
+    window.castLink = CaliLink.cast(room, null, { onTrack: s => {
       try{ const v = document.createElement("video"); v.muted = true; v.playsInline = true; v.autoplay = true;
         v.srcObject = s; v.play?.().catch(()=>{}); window.__tabcam = v; }catch{}
     }, onState: st => {
       if (st === "connected"){ banner.innerHTML = '📺 <b style="color:#5ec97e">connected to CaliHome</b> — kick up!'; setTimeout(() => { try{ banner.style.opacity = ".6"; }catch{} }, 3000); }
+      else if (st === "found") banner.innerHTML = '📺 <b style="color:#5ec97e">CaliHome found ✓</b> — tap Start camera';
       else if (st === "waiting") banner.textContent = "📺 looking for the CaliHome screen…";
       else if (st === "retry"){ banner.style.opacity = "1"; banner.textContent = "📺 reconnecting to CaliHome…"; }
     }});
-    // fallback: if the link hasn't connected in 18s, also light up the classic PeerJS path + code
-    setTimeout(() => {
-      if (!banner.innerHTML.includes("connected")) mirrorStart().then(c => pushCast(room, banner, c)).catch(()=>{});
-    }, 18000);
   }catch(e){
     banner.textContent = "📺 cast unavailable — check wifi";
     try{ mirrorStart().then(c => pushCast(room, banner, c)); }catch{}

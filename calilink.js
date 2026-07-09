@@ -57,10 +57,10 @@ const CaliLink = (() => {
   // PHONE: probe for the tablet, then offer the stream; self-heals on drops.
   function cast(room, stream, cb) {
     const ch = client().channel("cali-link-" + room);
-    let pc = null, hbCh = null, gotPong = false, stopped = false, connected = false, probing = false, tIceQ = [], offerT = null;
+    let pc = null, hbCh = null, gotPong = false, stopped = false, connected = false, probing = false, tIceQ = [], offerT = null, media = stream, lastPong = 0;
     const send = (event, payload) => { try { ch.send({ type: "broadcast", event, payload }); } catch {} };
     async function offer() {
-      if (stopped) return;
+      if (stopped || !media) return;
       try {
         if (pc) try { pc.close(); } catch {}
         tIceQ = [];
@@ -70,7 +70,7 @@ const CaliLink = (() => {
           hb.onclose = () => { if (hbT) clearInterval(hbT); };
         }catch{}
         pc.ontrack = ev => { try { cb.onTrack && cb.onTrack(ev.streams[0]); } catch {} };
-        stream.getTracks().forEach(t => pc.addTrack(t, stream));
+        media.getTracks().forEach(t => pc.addTrack(t, media));
         pc.onicecandidate = ev => { if (ev.candidate) send("ice-p", ev.candidate); };
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === "connected") { connected = true; clearTimeout(offerT); cb.onState && cb.onState("connected"); }
@@ -91,7 +91,11 @@ const CaliLink = (() => {
       setTimeout(() => {
         probing = false;
         if (stopped || connected) return;
-        if (gotPong) offer();
+        if (gotPong) {
+          lastPong = Date.now();
+          if (media) offer();
+          else { cb.onState && cb.onState("found"); setTimeout(probe, 5000); }   // stay warm until the camera starts
+        }
         else { cb.onState && cb.onState("waiting"); setTimeout(probe, 1800); }
       }, 800);
     }
@@ -108,7 +112,8 @@ const CaliLink = (() => {
     });
     ch.subscribe(st => { cb.onState && cb.onState(st); if (st === "SUBSCRIBED") probe(); });
     return { stop() { stopped = true; try { pc && pc.close(); } catch {}; try { ch.unsubscribe(); } catch {} },
-             send(obj) { try { if (hbCh && hbCh.readyState === "open") hbCh.send(JSON.stringify(obj)); } catch {} } };
+             send(obj) { try { if (hbCh && hbCh.readyState === "open") hbCh.send(JSON.stringify(obj)); } catch {} },
+             attach(s) { media = s; if (!connected && !stopped) { if (Date.now() - lastPong < 8000) offer(); else probe(); } } };
   }
   return { listen, cast };
 })();
