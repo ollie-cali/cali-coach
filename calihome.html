@@ -183,11 +183,19 @@ $("leave").addEventListener("click", dropLive);
 // A fresh Peer() = a clean broker connection, exactly what a page-reload gives you. If the connection
 // ever gets stuck (created but never "open"), we rebuild it instead of waiting forever (the bug where
 // entering the code did nothing until you reloaded).
+// ICE: STUN + public TURN relay so the mirror works ACROSS networks (phone on 4G / different
+// wifi / gym wifi with client isolation). Direct LAN path still wins when available.
+const ICE_CFG = { config: { iceServers: [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443",
+           "turns:openrelay.metered.ca:443?transport=tcp"],
+    username: "openrelayproject", credential: "openrelayproject" }
+] } };
 function newPeer(){
   try{ if (peer) peer.destroy(); }catch{}
   peerBornAt = Date.now();
   try{
-    peer = new Peer();
+    peer = new Peer(ICE_CFG);
     peer.on("open", () => { booting = false; rebuilds = 0; if (!live) toHome(); });
     peer.on("call", call => { try{ call.answer(); call.on("stream", goLive); }catch{} });
     peer.on("disconnected", () => { try{ peer.reconnect(); }catch{} });

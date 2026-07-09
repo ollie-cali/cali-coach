@@ -1075,8 +1075,16 @@ async function mirrorStart() {
   localStorage.setItem("caliMirrorCode", mirrorCode);
   canvasStream ||= canvas.captureStream(30);
   let idTries = 0;
+// ICE: STUN + public TURN relay so the mirror works ACROSS networks (phone on 4G / different
+// wifi / gym wifi with client isolation). Direct LAN path still wins when available.
+const ICE_CFG = { config: { iceServers: [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443",
+           "turns:openrelay.metered.ca:443?transport=tcp"],
+    username: "openrelayproject", credential: "openrelayproject" }
+] } };
   const wire = code => {
-    mirrorPeer = new Peer("cali-" + code);
+    mirrorPeer = new Peer("cali-" + code, ICE_CFG);
     mirrorPeer.on("connection", conn => {
       conn.on("data", () => {                          // mirror-hello -> call back with the canvas
         mirrorPeer.call(conn.peer, canvasStream);
