@@ -1254,7 +1254,7 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v28 · 09 Jul 19:00";
+  vd.textContent = "v29 · 09 Jul 19:35";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}
