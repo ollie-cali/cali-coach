@@ -187,6 +187,7 @@ function paintHUD(out, guide) {
     ctx.fillStyle = "#e9eef3"; ctx.shadowColor = "#000"; ctx.shadowBlur = 12 * s;
     ctx.fillText(out.holdSecs.toFixed(1) + "s", 26 * s, 24 * s); ctx.shadowBlur = 0;
   }
+  if (CLEAN && guide) pill(guide, W / 2, H * 0.62, `700 ${28 * s}px -apple-system,system-ui,sans-serif`, "#e0a73a");
   if (out.score != null) {
     ctx.font = `800 ${110 * s}px -apple-system,system-ui,sans-serif`;
     ctx.fillStyle = scoreCol(out.score);
@@ -1253,7 +1254,7 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v27 · 09 Jul 18:20";
+  vd.textContent = "v28 · 09 Jul 19:00";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}

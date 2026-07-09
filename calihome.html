@@ -109,7 +109,8 @@
   </div>
 </div>
 
-<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v27 · 09 Jul 18:20</div>
+<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v28 · 09 Jul 19:00</div>
+<div id="attract" style="display:none;position:fixed;top:10px;left:0;right:0;z-index:65;text-align:center;font:800 17px -apple-system,system-ui,sans-serif;color:#F2B208;letter-spacing:.03em;opacity:0;transition:opacity .9s;pointer-events:none;text-shadow:0 2px 10px #000"></div>
 <div id="wifihelp" style="position:fixed;left:12px;bottom:8px;z-index:70;font:600 13px -apple-system,system-ui,sans-serif;color:#F2B208;opacity:.85;cursor:pointer">📶 Not on the gym wifi? Tap here</div>
 <div id="wifimodal" style="display:none;position:fixed;inset:0;z-index:90;background:#000c;backdrop-filter:blur(4px)">
   <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#1A1A1E;border:1px solid #3a3a40;border-radius:20px;padding:26px 30px;text-align:center;max-width:420px">
@@ -213,17 +214,18 @@ const ICE_CFG = { config: { iceServers: [
 ] } };
 const rnd4 = () => Array.from({length:4}, () => "ABCDEFGHJKMNPQRSTUVWXYZ23456789"[Math.floor(Math.random()*31)]).join("");
 let room = localStorage.getItem("caliHomeRoom") || rnd4(); localStorage.setItem("caliHomeRoom", room);
-function qrState(s){ try{ const cap = document.querySelector(".qr span"); if (cap) cap.textContent = "screen " + room + " · " + s; }catch{} }
+function qrState(s, col){ try{ const cap = document.querySelector(".qr span");
+  if (cap) cap.innerHTML = '<span style="color:' + (col || "#F2B208") + ';font-size:22px;vertical-align:-3px">●</span> screen ' + room + " · " + s; }catch{} }
 let firstBoot = Date.now();
 function drawQR(){
   try{
     const url = new URL("./", location.href).href + "?only=handstand&cast=" + room;
     const q = qrcode(0, "M"); q.addData(url); q.make();
     $("qr").src = q.createDataURL(8, 8);
-    qrState("connecting…");
+    qrState("connecting…", "#F2B208");
   }catch(e){}
 }
-const APP_BUILD = 27;
+const APP_BUILD = 28;
 // kiosk self-update: a Fully-Kiosk tablet never navigates, so it never picks up deploys. Poll the
 // live sw.js every 10 min; when the build number changes (and we're not mid-session), reload.
 // The SW is network-first, so one reload = fully fresh.
@@ -266,16 +268,28 @@ try{
   $("wifihelp").addEventListener("click", () => { $("wifimodal").style.display = "block"; });
   $("wificlose").addEventListener("click", () => { $("wifimodal").style.display = "none"; });
 }catch(e){}
+
+// idle attract loop: invite people in while nobody is casting (showcase only)
+if (SHOWCASE) try{
+  const MSGS = ["🤸 Kick up and appear on THIS screen", "Scan the QR with your phone camera — that's it",
+                "See your balance, your line and your score — LIVE", "New here? Tap the 📶 wifi note bottom-left"];
+  let mi = 0; const at = $("attract"); at.style.display = "block";
+  const cycle = () => { if (live){ at.style.opacity = 0; return; }
+    at.style.opacity = 0;
+    setTimeout(() => { if (!live){ at.textContent = MSGS[mi++ % MSGS.length]; at.style.opacity = 1; } }, 900);
+  };
+  setTimeout(cycle, 1500); setInterval(cycle, 6500);
+}catch{}
 drawQR();
-try{ $("qr").addEventListener("click", () => { qrState("restarting…"); setTimeout(() => location.reload(), 300); }); }catch{}
+try{ $("qr").addEventListener("click", () => { qrState("restarting…", "#F2B208"); setTimeout(() => location.reload(), 300); }); }catch{}
 // PRIMARY pairing: CaliLink (Supabase-signalled WebRTC — venue-wifi friendly). PeerJS stays for the manual code path.
 try{
   CaliLink.listen(room, {
     onStream: goLive,
     onDrop: () => { if (live) dropLive(); },
     onState: st => {
-      if (st === "SUBSCRIBED") qrState("ready ✓ — scan to start");
-      else if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") qrState("⚠ pairing unreachable — tap the QR to retry");
+      if (st === "SUBSCRIBED") qrState("ready ✓ — scan to start", "#4cae6a");
+      else if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") qrState("⚠ pairing unreachable — tap the QR to retry", "#f0564b");
     }
   });
 }catch(e){ qrState("⚠ pairing failed to start — tap the QR"); }

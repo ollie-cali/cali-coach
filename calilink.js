@@ -12,13 +12,20 @@ const CaliLink = (() => {
   // TABLET: answer offers on this room forever; each new phone takes the screen over.
   function listen(room, cb) {
     const ch = client().channel("cali-link-" + room);
-    let pc = null;
+    let pc = null, hbWatch = null;
     const send = (event, payload) => { try { ch.send({ type: "broadcast", event, payload }); } catch {} };
     ch.on("broadcast", { event: "offer" }, async ({ payload }) => {
       try {
         if (pc) try { pc.close(); } catch {}
         pc = new RTCPeerConnection({ iceServers: ICE });
         pc.ontrack = ev => { try { cb.onStream(ev.streams[0]); } catch {} };
+        try{ if (hbWatch) clearInterval(hbWatch); }catch{}
+        pc.ondatachannel = ev => {
+          if (ev.channel.label !== "hb") return;
+          let last = Date.now();
+          ev.channel.onmessage = () => { last = Date.now(); };
+          hbWatch = setInterval(() => { if (Date.now() - last > 3500){ clearInterval(hbWatch); cb.onDrop && cb.onDrop(); } }, 700);
+        };
         pc.onconnectionstatechange = () => {
           const s = pc.connectionState;
           if (s === "failed" || s === "closed") { cb.onDrop && cb.onDrop(); }
@@ -47,6 +54,10 @@ const CaliLink = (() => {
       try {
         if (pc) try { pc.close(); } catch {}
         pc = new RTCPeerConnection({ iceServers: ICE });
+        try{ const hb = pc.createDataChannel("hb"); let hbT = null;
+          hb.onopen = () => { hbT = setInterval(() => { try{ hb.send("h"); }catch{} }, 1000); };
+          hb.onclose = () => { if (hbT) clearInterval(hbT); };
+        }catch{}
         stream.getTracks().forEach(t => pc.addTrack(t, stream));
         pc.onicecandidate = ev => { if (ev.candidate) send("ice-p", ev.candidate); };
         pc.onconnectionstatechange = () => {
