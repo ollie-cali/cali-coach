@@ -19,6 +19,11 @@ const CaliLink = (() => {
         if (pc) try { pc.close(); } catch {}
         pc = new RTCPeerConnection({ iceServers: ICE });
         pc.ontrack = ev => { try { cb.onStream(ev.streams[0]); } catch {} };
+        pc.onconnectionstatechange = () => {
+          const s = pc.connectionState;
+          if (s === "failed" || s === "closed") { cb.onDrop && cb.onDrop(); }
+          else if (s === "disconnected") setTimeout(() => { try{ if (pc.connectionState === "disconnected") cb.onDrop && cb.onDrop(); }catch{} }, 4000);
+        };
         pc.onicecandidate = ev => { if (ev.candidate) send("ice-t", ev.candidate); };
         await pc.setRemoteDescription(payload.sdp);
         const ans = await pc.createAnswer();

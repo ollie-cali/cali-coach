@@ -1188,6 +1188,12 @@ const ICE_CFG = { config: { iceServers: [
   try { $("voice").textContent = "🔊"; } catch {}
   // Lock to the one movement IMMEDIATELY (do not wait for the camera) and hide every control that
   // could change it, so the coach opens already pinned to handstand with no picker / auto-detect.
+  // opened from a CaliHome QR: strip the generic multi-movement copy — it's a handstand mirror.
+  try{
+    const sp = document.querySelector("#splash p");
+    if (sp) sp.textContent = "Allow the camera, prop your phone side-on, kick up. You'll appear on the CaliHome screen.";
+    const h1 = document.querySelector("#splash h1"); if (h1) h1.innerHTML = "CALI<b>HOME</b>";
+  }catch{}
   const HIDE = ["pick", "sessionbtn", "historybtn", "settings"];
   const lock = () => { try { if (locked !== only) setLock(only); } catch {} };
   const hide = () => HIDE.forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
@@ -1247,7 +1253,7 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v26 · 09 Jul 17:40";
+  vd.textContent = "v27 · 09 Jul 18:20";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}

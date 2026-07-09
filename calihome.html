@@ -109,7 +109,17 @@
   </div>
 </div>
 
-<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v26 · 09 Jul 17:40</div>
+<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v27 · 09 Jul 18:20</div>
+<div id="wifihelp" style="position:fixed;left:12px;bottom:8px;z-index:70;font:600 13px -apple-system,system-ui,sans-serif;color:#F2B208;opacity:.85;cursor:pointer">📶 Not on the gym wifi? Tap here</div>
+<div id="wifimodal" style="display:none;position:fixed;inset:0;z-index:90;background:#000c;backdrop-filter:blur(4px)">
+  <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#1A1A1E;border:1px solid #3a3a40;border-radius:20px;padding:26px 30px;text-align:center;max-width:420px">
+    <div style="font:800 20px -apple-system,system-ui,sans-serif;color:#ECE7DB;margin-bottom:4px">Join <span style="color:#F2B208">CaliUnity Wifi</span></div>
+    <div style="font:500 13px -apple-system,system-ui,sans-serif;color:#9a9aa2;margin-bottom:14px">Point your phone camera at this code, tap the banner, then come back and scan the big code.</div>
+    <img id="wifiqr" style="width:220px;height:220px;border-radius:12px;background:#ECE7DB;padding:8px" alt="wifi qr">
+    <div style="font:600 13px ui-monospace,monospace;color:#9a9aa2;margin-top:12px">password: <span style="color:#ECE7DB">WeLoveHandstands2025</span></div>
+    <button id="wificlose" style="margin-top:16px;background:#F2B208;color:#1A1A1E;border:0;border-radius:12px;padding:10px 26px;font:700 15px -apple-system,system-ui,sans-serif">Done</button>
+  </div>
+</div>
 <div id="footer">
   <div id="paired"></div>
   <button id="repairbtn" style="display:none">Pair a different phone</button>
@@ -213,7 +223,7 @@ function drawQR(){
     qrState("connecting…");
   }catch(e){}
 }
-const APP_BUILD = 26;
+const APP_BUILD = 27;
 // kiosk self-update: a Fully-Kiosk tablet never navigates, so it never picks up deploys. Poll the
 // live sw.js every 10 min; when the build number changes (and we're not mid-session), reload.
 // The SW is network-first, so one reload = fully fresh.
@@ -248,12 +258,21 @@ function newPeer(){
     peer.on("close", () => { if (!live) setTimeout(newPeer, 700); });
   }catch(e){ setTimeout(newPeer, 1500); }
 }
+
+// wifi-help modal: WIFI: QR joins the phone to the gym network (camera-scannable on iOS+Android)
+try{
+  const wq = qrcode(0, "M"); wq.addData("WIFI:T:WPA;S:CaliUnity Wifi;P:WeLoveHandstands2025;;"); wq.make();
+  $("wifiqr").src = wq.createDataURL(7, 7);
+  $("wifihelp").addEventListener("click", () => { $("wifimodal").style.display = "block"; });
+  $("wificlose").addEventListener("click", () => { $("wifimodal").style.display = "none"; });
+}catch(e){}
 drawQR();
 try{ $("qr").addEventListener("click", () => { qrState("restarting…"); setTimeout(() => location.reload(), 300); }); }catch{}
 // PRIMARY pairing: CaliLink (Supabase-signalled WebRTC — venue-wifi friendly). PeerJS stays for the manual code path.
 try{
   CaliLink.listen(room, {
     onStream: goLive,
+    onDrop: () => { if (live) dropLive(); },
     onState: st => {
       if (st === "SUBSCRIBED") qrState("ready ✓ — scan to start");
       else if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") qrState("⚠ pairing unreachable — tap the QR to retry");
