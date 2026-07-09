@@ -1219,7 +1219,7 @@ const ICE_CFG = { config: { iceServers: [
     b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
       + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
     b.textContent = "📺 finding your CaliHome screen…"; document.body.appendChild(b);
-    linkCast(CAST0.toUpperCase(), b);          // WARM: signalling connects while they read the splash
+    setTimeout(() => linkCast(CAST0.toUpperCase(), b), 0);   // WARM (deferred a tick: module still initialising)
   }
   let casted = false;
   setInterval(() => {
@@ -1283,7 +1283,7 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v33 · 09 Jul 21:45";
+  vd.textContent = "v34 · 09 Jul 22:05";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}
