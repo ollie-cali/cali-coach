@@ -1245,5 +1245,14 @@ function pushCast(room, banner, myCode){
   attempt();
 }
 
+
+// visible build stamp (bottom-left, tiny) so live-version checks never need devtools
+try {
+  const vd = document.createElement("div");
+  vd.textContent = "v23 · 09 Jul 16:00";
+  vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
+  document.body.appendChild(vd);
+} catch {}
+
 // ================= PWA =================
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});

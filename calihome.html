@@ -109,6 +109,7 @@
   </div>
 </div>
 
+<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v23 · 09 Jul 16:00</div>
 <div id="footer">
   <div id="paired"></div>
   <button id="repairbtn" style="display:none">Pair a different phone</button>
@@ -213,7 +214,7 @@ function newPeer(){
   peerBornAt = Date.now();
   try{
     peer = new Peer("calihome-" + room, ICE_CFG);
-    peer.on("open", () => { booting = false; rebuilds = 0; roomTries = 0; if (!live) toHome(); });
+    peer.on("open", () => { booting = false; rebuilds = 0; roomTries = 0; wdNext = 0; try{ const cap = document.querySelector(".qr span"); if (cap) cap.textContent = "scan to start · screen " + room + " · ready ✓"; }catch{} if (!live) toHome(); });
     peer.on("call", call => { try{ call.answer(); call.on("stream", goLive); }catch{} });
     peer.on("disconnected", () => { try{ peer.reconnect(); }catch{} });
     peer.on("error", e => {
@@ -236,12 +237,17 @@ drawQR();
 // stuck-registration watchdog: a contested/zombie id can leave the peer silently neither open nor
 // errored. If our OWNED registration hasn't opened within 5s, rebuild until it does (same medicine
 // hunt() uses). This is what heals the tablet after reloads with no human touching anything.
+let wdNext = 0;
 setInterval(() => {
   try{
-    if (!live && peer && !peer.destroyed && !peer.open && Date.now() - peerBornAt > 5000) newPeer();
-    if (!live && (!peer || peer.destroyed)) newPeer();
+    const stuck = !live && ((peer && !peer.destroyed && !peer.open && Date.now() - peerBornAt > 8000) || !peer || peer.destroyed);
+    if (stuck && Date.now() > wdNext){
+      // exponential backoff: hammering a rate-limited broker digs the hole deeper
+      wdNext = Date.now() + Math.min(30000, 1500 * Math.pow(2, Math.min(rebuilds, 4)));
+      rebuilds++; newPeer();
+    }
   }catch{}
-}, 2000);
+}, 1000);
 function hunt(){
   if (live || !code) return;
   if (!peer || peer.destroyed){ newPeer(); }
