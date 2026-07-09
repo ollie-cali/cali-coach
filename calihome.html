@@ -233,6 +233,15 @@ function newPeer(){
   }catch(e){ setTimeout(newPeer, 1500); }
 }
 drawQR();
+// stuck-registration watchdog: a contested/zombie id can leave the peer silently neither open nor
+// errored. If our OWNED registration hasn't opened within 5s, rebuild until it does (same medicine
+// hunt() uses). This is what heals the tablet after reloads with no human touching anything.
+setInterval(() => {
+  try{
+    if (!live && peer && !peer.destroyed && !peer.open && Date.now() - peerBornAt > 5000) newPeer();
+    if (!live && (!peer || peer.destroyed)) newPeer();
+  }catch{}
+}, 2000);
 function hunt(){
   if (live || !code) return;
   if (!peer || peer.destroyed){ newPeer(); }
