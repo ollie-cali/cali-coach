@@ -228,11 +228,18 @@ function paintGoggles(lm, out) {
       const sx = Math.max(0, nx - hr), sy = Math.max(0, ny - hr);
       const sw = Math.min(2 * hr, W - sx), sh = Math.min(2 * hr, H - sy);
       const R = 0.10 * Math.min(W, H), cx = W - R - 20 * s, cy = R + 24 * s;
-      if (sw > 8 && sh > 8 && (Math.abs(cx - nx) > R + hr || Math.abs(cy - ny) > R + hr)) {
+      const tc = window.__tabcam;
+      const useTab = tc && tc.readyState >= 2 && tc.videoWidth > 0;
+      if (useTab || (sw > 8 && sh > 8 && (Math.abs(cx - nx) > R + hr || Math.abs(cy - ny) > R + hr))) {
         ctx.save();
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.clip();
-        ctx.translate(cx, cy); ctx.rotate(Math.PI);          // inverted athlete -> upright face
-        ctx.drawImage(canvas, sx, sy, sw, sh, -R, -R, 2 * R, 2 * R);
+        if (useTab) {                                         // the REAL POV: the tablet looking up at you
+          const vw = tc.videoWidth, vh = tc.videoHeight, m = Math.min(vw, vh);
+          ctx.drawImage(tc, (vw - m) / 2, (vh - m) / 2, m, m, cx - R, cy - R, 2 * R, 2 * R);
+        } else {
+          ctx.translate(cx, cy); ctx.rotate(Math.PI);         // fallback: cropped upright face
+          ctx.drawImage(canvas, sx, sy, sw, sh, -R, -R, 2 * R, 2 * R);
+        }
         ctx.restore();
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7);
         ctx.lineWidth = 4 * s; ctx.strokeStyle = scoreCol(out.score ?? 50); ctx.stroke();
@@ -806,6 +813,10 @@ function loop() {
   if (out.cue) say(out.cue);
   if (lm) draw(lm, out.mode === "HANDSTAND" ? scoreCol(out.score ?? 50) : (MODE_COL[out.mode] || "#9aa4ad"));
   if (lm && out.mode === "HANDSTAND") ghostLine(lm);
+  try{
+    if (window.castLink && out.mode === "HANDSTAND" && out.holdSecs != null && out.holdSecs > 0.2 && !window.__castHold){ window.__castHold = true; castLink.send({ t: "start" }); }
+    if (window.__castHold && out.mode !== "HANDSTAND") window.__castHold = false;
+  }catch{}
   ctx.restore();                 // undo the mirror BEFORE any text, so words never render flipped
   shotTick(lm, out, now);
   ghostTick(lm, out, now);
@@ -829,7 +840,8 @@ function loop() {
     journalAdd(e);
     // handstand + a tablet watching (showcase/mirror) -> draw the debrief ON the canvas so it streams;
     // otherwise the phone's DOM overlay. Both give score + slo-mo replay + what to work on.
-    if ((CLEAN || mirrorPeer) && e.type === "handstand" && startReview(e, aarFrames)) { /* canvas review streams to the tablet */ }
+    if (window.castLink) { try { castLink.send({ t: "hold", kind: e.type, secs: e.secs ?? 0, avg: e.avg ?? null, pb: !!e.pb }); } catch {} }
+    if ((CLEAN || mirrorPeer) && !window.castLink && e.type === "handstand" && startReview(e, aarFrames)) { /* canvas review streams to the tablet */ }
     else showReport(e, aarFrames);            // skill debrief + instant replay (hold kinds only)
     // voice: reps announced here; holds are spoken inside showReport
     if (!e.pb && !HOLD_KINDS.includes(e.type)) say(`${prevReps} reps, average ${Math.round(e.avg)}`, true);
@@ -1254,7 +1266,7 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v29 · 09 Jul 19:35";
+  vd.textContent = "v30 · 09 Jul 20:30";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}
@@ -1267,7 +1279,10 @@ async function linkCast(room, banner){
     await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2");
     await loadScript("calilink.js");
     canvasStream ||= canvas.captureStream(30);
-    CaliLink.cast(room, canvasStream, { onState: st => {
+    window.castLink = CaliLink.cast(room, canvasStream, { onTrack: s => {
+      try{ const v = document.createElement("video"); v.muted = true; v.playsInline = true; v.autoplay = true;
+        v.srcObject = s; v.play?.().catch(()=>{}); window.__tabcam = v; }catch{}
+    }, onState: st => {
       if (st === "connected"){ banner.innerHTML = '📺 <b style="color:#5ec97e">connected to CaliHome</b> — kick up!'; setTimeout(() => { try{ banner.style.opacity = ".6"; }catch{} }, 3000); }
       else if (st === "waiting") banner.textContent = "📺 looking for the CaliHome screen…";
       else if (st === "retry"){ banner.style.opacity = "1"; banner.textContent = "📺 reconnecting to CaliHome…"; }

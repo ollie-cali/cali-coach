@@ -24,7 +24,10 @@ const CaliLink = (() => {
         pc.ondatachannel = ev => {
           if (ev.channel.label !== "hb") return;
           let last = Date.now();
-          ev.channel.onmessage = () => { last = Date.now(); };
+          ev.channel.onmessage = m => {
+            last = Date.now();
+            if (m.data !== "h") { try { cb.onMsg && cb.onMsg(JSON.parse(m.data)); } catch {} }
+          };
           hbWatch = setInterval(() => { if (Date.now() - last > 3500){ clearInterval(hbWatch); cb.onDrop && cb.onDrop(); } }, 700);
         };
         pc.onconnectionstatechange = () => {
@@ -35,6 +38,8 @@ const CaliLink = (() => {
         pc.onicecandidate = ev => { if (ev.candidate) send("ice-t", ev.candidate); };
         await pc.setRemoteDescription(payload.sdp);
         for (const cand of iceQ.splice(0)) { try { await pc.addIceCandidate(cand); } catch {} }
+        try { const up = cb.upstream && cb.upstream();            // tablet's front camera -> the phone (the POV shot)
+          if (up) up.getTracks().forEach(t => pc.addTrack(t, up)); } catch {}
         const ans = await pc.createAnswer();
         await pc.setLocalDescription(ans);
         send("answer", { sdp: pc.localDescription });
@@ -52,7 +57,7 @@ const CaliLink = (() => {
   // PHONE: probe for the tablet, then offer the stream; self-heals on drops.
   function cast(room, stream, cb) {
     const ch = client().channel("cali-link-" + room);
-    let pc = null, gotPong = false, stopped = false, connected = false, probing = false, tIceQ = [], offerT = null;
+    let pc = null, hbCh = null, gotPong = false, stopped = false, connected = false, probing = false, tIceQ = [], offerT = null;
     const send = (event, payload) => { try { ch.send({ type: "broadcast", event, payload }); } catch {} };
     async function offer() {
       if (stopped) return;
@@ -60,10 +65,11 @@ const CaliLink = (() => {
         if (pc) try { pc.close(); } catch {}
         tIceQ = [];
         pc = new RTCPeerConnection({ iceServers: ICE });
-        try{ const hb = pc.createDataChannel("hb"); let hbT = null;
+        try{ hbCh = pc.createDataChannel("hb"); const hb = hbCh; let hbT = null;
           hb.onopen = () => { hbT = setInterval(() => { try{ hb.send("h"); }catch{} }, 1000); };
           hb.onclose = () => { if (hbT) clearInterval(hbT); };
         }catch{}
+        pc.ontrack = ev => { try { cb.onTrack && cb.onTrack(ev.streams[0]); } catch {} };
         stream.getTracks().forEach(t => pc.addTrack(t, stream));
         pc.onicecandidate = ev => { if (ev.candidate) send("ice-p", ev.candidate); };
         pc.onconnectionstatechange = () => {
@@ -101,7 +107,8 @@ const CaliLink = (() => {
       else tIceQ.push(payload);                      // answer not applied yet — hold it
     });
     ch.subscribe(st => { cb.onState && cb.onState(st); if (st === "SUBSCRIBED") probe(); });
-    return { stop() { stopped = true; try { pc && pc.close(); } catch {}; try { ch.unsubscribe(); } catch {} } };
+    return { stop() { stopped = true; try { pc && pc.close(); } catch {}; try { ch.unsubscribe(); } catch {} },
+             send(obj) { try { if (hbCh && hbCh.readyState === "open") hbCh.send(JSON.stringify(obj)); } catch {} } };
   }
   return { listen, cast };
 })();
