@@ -109,7 +109,7 @@
   </div>
 </div>
 
-<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v23 · 09 Jul 16:00</div>
+<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v24 · 09 Jul 16:25</div>
 <div id="footer">
   <div id="paired"></div>
   <button id="repairbtn" style="display:none">Pair a different phone</button>
@@ -209,6 +209,17 @@ function drawQR(){
     const cap = document.querySelector(".qr span"); if (cap) cap.textContent = "scan to start · screen " + room;
   }catch(e){}
 }
+const APP_BUILD = 24;
+// kiosk self-update: a Fully-Kiosk tablet never navigates, so it never picks up deploys. Poll the
+// live sw.js every 10 min; when the build number changes (and we're not mid-session), reload.
+// The SW is network-first, so one reload = fully fresh.
+setInterval(async () => {
+  try{
+    const t = await (await fetch("sw.js?u=" + Date.now(), { cache: "no-store" })).text();
+    const m = t.match(/cali-coach-v(\d+)/);
+    if (m && parseInt(m[1]) > APP_BUILD && !live) location.reload();
+  }catch{}
+}, 10 * 60 * 1000);
 function newPeer(){
   try{ if (peer) peer.destroy(); }catch{}
   peerBornAt = Date.now();
