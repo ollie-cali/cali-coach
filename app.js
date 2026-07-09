@@ -1204,11 +1204,9 @@ const ICE_CFG = { config: { iceServers: [
         + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
       b.textContent = "📺 starting CaliHome cast…"; document.body.appendChild(b);
       const CAST = new URLSearchParams(location.search).get("cast");
-      mirrorStart()
-        .then(c => {
-          if (CAST) { b.textContent = "📺 connecting to CaliHome…"; pushCast(CAST.toUpperCase(), b, c); }
-          else b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`;
-        })
+      if (CAST) { b.textContent = "📺 connecting to CaliHome…"; linkCast(CAST.toUpperCase(), b); }
+      else mirrorStart()
+        .then(c => { b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`; })
         .catch(() => { b.textContent = "📺 cast unavailable — check wifi"; });
     }
   }, 400);
@@ -1249,10 +1247,33 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v25 · 09 Jul 17:05";
+  vd.textContent = "v26 · 09 Jul 17:40";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}
+
+
+// QR-scanned pairing over CaliLink (Supabase-signalled). PeerJS/manual stays as the fallback.
+const loadScript = src => new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+async function linkCast(room, banner){
+  try{
+    await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2");
+    await loadScript("calilink.js");
+    canvasStream ||= canvas.captureStream(30);
+    CaliLink.cast(room, canvasStream, { onState: st => {
+      if (st === "connected"){ banner.innerHTML = '📺 <b style="color:#5ec97e">connected to CaliHome</b> — kick up!'; setTimeout(() => { try{ banner.style.opacity = ".6"; }catch{} }, 3000); }
+      else if (st === "waiting") banner.textContent = "📺 looking for the CaliHome screen…";
+      else if (st === "retry"){ banner.style.opacity = "1"; banner.textContent = "📺 reconnecting to CaliHome…"; }
+    }});
+    // fallback: if the link hasn't connected in 18s, also light up the classic PeerJS path + code
+    setTimeout(() => {
+      if (!banner.innerHTML.includes("connected")) mirrorStart().then(c => pushCast(room, banner, c)).catch(()=>{});
+    }, 18000);
+  }catch(e){
+    banner.textContent = "📺 cast unavailable — check wifi";
+    try{ mirrorStart().then(c => pushCast(room, banner, c)); }catch{}
+  }
+}
 
 // ================= PWA =================
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});

@@ -109,7 +109,7 @@
   </div>
 </div>
 
-<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v25 · 09 Jul 17:05</div>
+<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v26 · 09 Jul 17:40</div>
 <div id="footer">
   <div id="paired"></div>
   <button id="repairbtn" style="display:none">Pair a different phone</button>
@@ -122,6 +122,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="calilink.js"></script>
 <script>/* qrcode-generator (MIT, Kazuhiko Arase) vendored */
 /**
  * Minified by jsDelivr using Terser v5.37.0.
@@ -211,7 +213,7 @@ function drawQR(){
     qrState("connecting…");
   }catch(e){}
 }
-const APP_BUILD = 25;
+const APP_BUILD = 26;
 // kiosk self-update: a Fully-Kiosk tablet never navigates, so it never picks up deploys. Poll the
 // live sw.js every 10 min; when the build number changes (and we're not mid-session), reload.
 // The SW is network-first, so one reload = fully fresh.
@@ -227,7 +229,7 @@ function newPeer(){
   peerBornAt = Date.now();
   try{
     peer = new Peer("calihome-" + room, ICE_CFG);
-    peer.on("open", () => { booting = false; rebuilds = 0; roomTries = 0; wdNext = 0; qrState("ready ✓ — scan to start"); if (!live) toHome(); });
+    peer.on("open", () => { booting = false; rebuilds = 0; roomTries = 0; wdNext = 0; if (!live) toHome(); });
     peer.on("call", call => { try{ call.answer(); call.on("stream", goLive); }catch{} });
     peer.on("disconnected", () => { try{ peer.reconnect(); }catch{} });
     peer.on("error", e => {
@@ -247,7 +249,17 @@ function newPeer(){
   }catch(e){ setTimeout(newPeer, 1500); }
 }
 drawQR();
-try{ $("qr").addEventListener("click", () => { qrState("retrying…"); rebuilds = 0; wdNext = 0; firstBoot = Date.now(); newPeer(); }); }catch{}
+try{ $("qr").addEventListener("click", () => { qrState("restarting…"); setTimeout(() => location.reload(), 300); }); }catch{}
+// PRIMARY pairing: CaliLink (Supabase-signalled WebRTC — venue-wifi friendly). PeerJS stays for the manual code path.
+try{
+  CaliLink.listen(room, {
+    onStream: goLive,
+    onState: st => {
+      if (st === "SUBSCRIBED") qrState("ready ✓ — scan to start");
+      else if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") qrState("⚠ pairing unreachable — tap the QR to retry");
+    }
+  });
+}catch(e){ qrState("⚠ pairing failed to start — tap the QR"); }
 // stuck-registration watchdog: a contested/zombie id can leave the peer silently neither open nor
 // errored. If our OWNED registration hasn't opened within 5s, rebuild until it does (same medicine
 // hunt() uses). This is what heals the tablet after reloads with no human touching anything.
@@ -255,7 +267,6 @@ let wdNext = 0;
 setInterval(() => {
   try{
     const stuck = !live && ((peer && !peer.destroyed && !peer.open && Date.now() - peerBornAt > 8000) || !peer || peer.destroyed);
-    if (!live && (!peer || !peer.open) && Date.now() - firstBoot > 20000) qrState("⚠ pairing server unreachable — switch the tablet to hotspot wifi");
     if (stuck && Date.now() > wdNext){
       // exponential backoff: hammering a rate-limited broker digs the hole deeper
       wdNext = Date.now() + Math.min(30000, 1500 * Math.pow(2, Math.min(rebuilds, 4)));
