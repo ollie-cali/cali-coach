@@ -109,7 +109,7 @@
   </div>
 </div>
 
-<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v30 · 09 Jul 20:30</div>
+<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v31 · 09 Jul 20:55</div>
 <div id="attract" style="display:none;position:fixed;top:10px;left:0;right:0;z-index:65;text-align:center;font:800 17px -apple-system,system-ui,sans-serif;color:#F2B208;letter-spacing:.03em;opacity:0;transition:opacity .9s;pointer-events:none;text-shadow:0 2px 10px #000"></div>
 <div id="histstrip" style="display:none;position:fixed;top:44px;left:0;right:0;z-index:66;text-align:center;pointer-events:auto"></div>
 <div id="statmodal" style="display:none;position:fixed;inset:0;z-index:88;background:#0009;backdrop-filter:blur(3px)">
@@ -241,7 +241,7 @@ function drawQR(){
     qrState("connecting…", "#F2B208");
   }catch(e){}
 }
-const APP_BUILD = 30;
+const APP_BUILD = 31;
 // kiosk self-update: a Fully-Kiosk tablet never navigates, so it never picks up deploys. Poll the
 // live sw.js every 10 min; when the build number changes (and we're not mid-session), reload.
 // The SW is network-first, so one reload = fully fresh.
@@ -312,7 +312,9 @@ function histRender(){
 function playAttempt(i){
   const a = attempts[i]; if (!a || !a.url) return;
   $("statmodal").style.display = "none";
-  $("rp-v").src = a.url; $("replayer").style.display = "block";
+  const v = $("rp-v"); v.muted = true; v.src = a.url;
+  $("replayer").style.display = "block";
+  try{ v.load(); v.play().catch(()=>{}); }catch{}
 }
 $("rp-x").addEventListener("click", () => { $("replayer").style.display = "none"; $("rp-v").pause(); });
 $("rp-v").addEventListener("ended", () => { $("replayer").style.display = "none"; });
@@ -332,8 +334,8 @@ function recStop(meta){
     r.onstop = () => {
       let url = null;
       try{ url = URL.createObjectURL(new Blob(recChunks, { type: "video/webm" })); }catch{}
-      attempts.unshift({ ...meta, url }); attempts = attempts.slice(0, 8);
-      if (attempts.length > 7 && attempts[7].url) try{ URL.revokeObjectURL(attempts[7].url); }catch{}
+      attempts.unshift({ ...meta, url });
+      attempts.splice(8).forEach(old => { if (old.url) try{ URL.revokeObjectURL(old.url); }catch{} });
       statModal(meta, url); histRender();
     };
     setTimeout(() => { try{ r.stop(); }catch{ statModal(meta, null); } }, 600);
