@@ -1148,13 +1148,10 @@ async function mirrorStart() {
   localStorage.setItem("caliMirrorCode", mirrorCode);
   canvasStream ||= canvas.captureStream(30);
   let idTries = 0;
-// ICE: STUN + public TURN relay so the mirror works ACROSS networks (phone on 4G / different
-// wifi / gym wifi with client isolation). Direct LAN path still wins when available.
+// ICE: STUN only. (A dead public TURN was stalling ICE and made pairing WORSE - removed 9 Jul.
+// When we run our own TURN (coturn/Cloudflare), add it here and cross-network gets bulletproof.)
 const ICE_CFG = { config: { iceServers: [
-  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443",
-           "turns:openrelay.metered.ca:443?transport=tcp"],
-    username: "openrelayproject", credential: "openrelayproject" }
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }
 ] } };
   const wire = code => {
     mirrorPeer = new Peer("cali-" + code, ICE_CFG);
@@ -1206,12 +1203,42 @@ const ICE_CFG = { config: { iceServers: [
       b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
         + "font:600 15px/1.35 -apple-system,system-ui,sans-serif;padding:9px 12px;text-align:center;letter-spacing:.02em";
       b.textContent = "📺 starting CaliHome cast…"; document.body.appendChild(b);
+      const CAST = new URLSearchParams(location.search).get("cast");
       mirrorStart()
-        .then(c => { b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`; })
+        .then(c => {
+          if (CAST) { b.textContent = "📺 connecting to CaliHome…"; pushCast(CAST.toUpperCase(), b, c); }
+          else b.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${c}</b> &nbsp;enter it on the gym screen`;
+        })
         .catch(() => { b.textContent = "📺 cast unavailable — check wifi"; });
     }
   }, 400);
 })();
+
+
+// scanned from a CaliHome QR (?cast=ROOM): the phone connects TO the tablet - nobody types anything.
+let pushT = null;
+function pushCast(room, banner, myCode){
+  const target = "calihome-" + room;
+  const fallback = () => { banner.innerHTML = `📺 CaliHome code <b style="color:#F2B208;letter-spacing:5px;font-size:20px">${myCode}</b> &nbsp;enter it on the gym screen`; };
+  const attempt = () => {
+    if (!mirrorPeer || !mirrorPeer.open){ clearTimeout(pushT); pushT = setTimeout(attempt, 1200); return; }
+    try{
+      const conn = mirrorPeer.connect(target, { reliable: true });
+      let opened = false;
+      conn.on("open", () => {
+        opened = true;
+        try { mirrorPeer.call(target, canvasStream); } catch {}
+        banner.innerHTML = '📺 <b style="color:#5ec97e">connected to CaliHome</b> — kick up!';
+        setTimeout(() => { try{ banner.style.opacity = ".6"; }catch{} }, 3000);
+        conn.on("close", () => { banner.style.opacity = "1"; banner.textContent = "📺 reconnecting to CaliHome…"; clearTimeout(pushT); pushT = setTimeout(attempt, 1500); });
+      });
+      conn.on("error", () => { if (!opened){ clearTimeout(pushT); pushT = setTimeout(attempt, 2500); } });
+      setTimeout(() => { if (!opened){ try{ conn.close(); }catch{} } }, 8000);
+    }catch{ clearTimeout(pushT); pushT = setTimeout(attempt, 2500); }
+  };
+  setTimeout(() => { if (banner.textContent.includes("connecting")) fallback(); }, 20000);  // never strand them: show the manual code if push can't land
+  attempt();
+}
 
 // ================= PWA =================
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
