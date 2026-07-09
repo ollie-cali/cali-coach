@@ -1231,10 +1231,10 @@ const ICE_CFG = { config: { iceServers: [
         if (b) b.textContent = "📺 connecting to CaliHome…";
         canvasStream ||= canvas.captureStream(30);
         castLink.attach(canvasStream);
-        setTimeout(() => {                    // classic PeerJS fallback if the link never lands
+        setTimeout(() => {                    // QR-only world: if it can't land, guide them to restart the screen
           const bb = document.getElementById("castbanner");
-          if (bb && !bb.innerHTML.includes("connected")) mirrorStart().then(c => pushCast(CAST0.toUpperCase(), bb, c)).catch(() => {});
-        }, 18000);
+          if (bb && !bb.innerHTML.includes("connected")) bb.textContent = "📺 taking longer than usual — tap the QR on the screen to restart it, then rescan";
+        }, 20000);
       } else {
         const b = document.createElement("div"); b.id = "castbanner";
         b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:60;background:#1A1A1Eef;color:#ECE7DB;"
@@ -1283,7 +1283,7 @@ function pushCast(room, banner, myCode){
 // visible build stamp (bottom-left, tiny) so live-version checks never need devtools
 try {
   const vd = document.createElement("div");
-  vd.textContent = "v35 · 09 Jul 22:45";
+  vd.textContent = "v36 · 09 Jul 23:10";
   vd.style.cssText = "position:fixed;left:8px;bottom:6px;z-index:55;font:600 10px ui-monospace,monospace;color:#ECE7DB;opacity:.35;pointer-events:none";
   document.body.appendChild(vd);
 } catch {}

@@ -34,7 +34,7 @@
 
   /* showcase: QR + steps + input, a horizontal totem card */
   #show{display:none} #show.on{display:flex;align-items:center;gap:clamp(20px,4vw,54px);flex-wrap:wrap;justify-content:center}
-  body.sc #pair p{display:none}   /* showcase: the numbered steps replace the instruction paragraph */
+  body.sc #pair{display:none} body.sc #status{display:none}   /* showcase: QR-only — no code entry (v36, it just works) */
   .qr{display:flex;flex-direction:column;align-items:center;gap:10px}
   .qr img{width:clamp(150px,20vw,220px);height:auto;border-radius:14px;background:var(--bone);padding:10px}
   .qr span{color:var(--gold);letter-spacing:.16em;text-transform:uppercase;font-size:12px;font-weight:800}
@@ -109,7 +109,7 @@
   </div>
 </div>
 
-<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v35 · 09 Jul 22:45</div>
+<div style="position:fixed;right:10px;bottom:8px;z-index:70;font:600 11px ui-monospace,monospace;color:#ECE7DB;opacity:.4;pointer-events:none">v36 · 09 Jul 23:10</div>
 <div id="attract" style="display:none;position:fixed;top:10px;left:0;right:0;z-index:65;text-align:center;font:800 17px -apple-system,system-ui,sans-serif;color:#F2B208;letter-spacing:.03em;opacity:0;transition:opacity .9s;pointer-events:none;text-shadow:0 2px 10px #000"></div>
 <div id="histstrip" style="display:none;position:fixed;top:44px;left:0;right:0;z-index:66;text-align:center;pointer-events:auto"></div>
 <div id="statmodal" style="display:none;position:fixed;inset:0;z-index:88;background:#0009;backdrop-filter:blur(3px)">
@@ -241,7 +241,7 @@ function drawQR(){
     qrState("connecting…", "#F2B208");
   }catch(e){}
 }
-const APP_BUILD = 35;
+const APP_BUILD = 36;
 // kiosk self-update: a Fully-Kiosk tablet never navigates, so it never picks up deploys. Poll the
 // live sw.js every 10 min; when the build number changes (and we're not mid-session), reload.
 // The SW is network-first, so one reload = fully fresh.
