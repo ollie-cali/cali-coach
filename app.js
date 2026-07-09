@@ -1233,7 +1233,12 @@ function pushCast(room, banner, myCode){
         conn.on("close", () => { banner.style.opacity = "1"; banner.textContent = "📺 reconnecting to CaliHome…"; clearTimeout(pushT); pushT = setTimeout(attempt, 1500); });
       });
       conn.on("error", () => { if (!opened){ clearTimeout(pushT); pushT = setTimeout(attempt, 2500); } });
-      setTimeout(() => { if (!opened){ try{ conn.close(); }catch{} } }, 8000);
+      const onPeerErr = e => { if (e.type === "peer-unavailable" && !opened){ try{ mirrorPeer.off("error", onPeerErr); }catch{}; clearTimeout(pushT); pushT = setTimeout(attempt, 2000); } };
+      try{ mirrorPeer.on("error", onPeerErr); }catch{}
+      setTimeout(() => {
+        try{ mirrorPeer.off("error", onPeerErr); }catch{}
+        if (!opened){ try{ conn.close(); }catch{}; clearTimeout(pushT); pushT = setTimeout(attempt, 1500); }   // ALWAYS retry — never strand "connecting…"
+      }, 8000);
     }catch{ clearTimeout(pushT); pushT = setTimeout(attempt, 2500); }
   };
   setTimeout(() => { if (banner.textContent.includes("connecting")) fallback(); }, 20000);  // never strand them: show the manual code if push can't land

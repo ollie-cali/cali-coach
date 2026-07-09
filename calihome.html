@@ -137,7 +137,7 @@ const KEY = "caliHomeCode";
 const SHOWCASE = new URLSearchParams(location.search).has("showcase");   // gym totem mode
 if (SHOWCASE) document.body.classList.add("sc");
 let peer = null, code = SHOWCASE ? null : localStorage.getItem(KEY), live = false, retryT = null, booting = true;
-let peerBornAt = 0, rebuilds = 0;
+let peerBornAt = 0, rebuilds = 0, roomTries = 0;
 // survive a reload (manual or the last-resort auto-reload) without losing the entered code
 try { if (!code) { const pend = sessionStorage.getItem("caliPending"); if (pend) code = pend; } } catch {}
 
@@ -205,6 +205,7 @@ function drawQR(){
     const url = new URL("./", location.href).href + "?only=handstand&cast=" + room;
     const q = qrcode(0, "M"); q.addData(url); q.make();
     $("qr").src = q.createDataURL(8, 8);
+    const cap = document.querySelector(".qr span"); if (cap) cap.textContent = "scan to start · screen " + room;
   }catch(e){}
 }
 function newPeer(){
@@ -212,13 +213,19 @@ function newPeer(){
   peerBornAt = Date.now();
   try{
     peer = new Peer("calihome-" + room, ICE_CFG);
-    peer.on("open", () => { booting = false; rebuilds = 0; if (!live) toHome(); });
+    peer.on("open", () => { booting = false; rebuilds = 0; roomTries = 0; if (!live) toHome(); });
     peer.on("call", call => { try{ call.answer(); call.on("stream", goLive); }catch{} });
     peer.on("disconnected", () => { try{ peer.reconnect(); }catch{} });
     peer.on("error", e => {
       // "peer-unavailable" = the phone's code isn't casting yet (normal, keep hunting).
       // network/server/socket errors = our link to the broker is broken -> rebuild a fresh one.
-      if (e.type === "unavailable-id"){ room = rnd4(); localStorage.setItem("caliHomeRoom", room); drawQR(); setTimeout(newPeer, 400); return; }
+      if (e.type === "unavailable-id"){
+        // our own zombie registration from a reload still holds the id on the broker: it releases in
+        // seconds. RETRY THE SAME room (the QR already printed it / a phone may have scanned it).
+        // Mint a new room only after ~9s of failures.
+        if (++roomTries <= 6){ setStatus("starting…"); setTimeout(newPeer, 1500); return; }
+        room = rnd4(); localStorage.setItem("caliHomeRoom", room); roomTries = 0; drawQR(); setTimeout(newPeer, 400); return;
+      }
       if (["network","server-error","socket-error","socket-closed","browser-incompatible"].includes(e.type))
         setTimeout(newPeer, 700);
     });
