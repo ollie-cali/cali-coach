@@ -53,8 +53,25 @@
   .jrow .val small{color:var(--dim);font-weight:400}
   #unlocks{margin-top:16px;color:var(--green);font-weight:700}
   #stamp{position:fixed;right:8px;bottom:6px;z-index:30;font:600 10px ui-monospace,monospace;color:var(--ink);opacity:.35}
+  /* ---- reward mode: the video is the payoff, earned continuously by the stretch (spec §9½) ---- */
+  #yt{position:fixed;inset:0;z-index:5;display:none;background:#000}
+  #yt iframe{width:100%;height:100%;border:0}
+  #paused{position:fixed;inset:0;z-index:7;display:none;align-items:center;justify-content:center;background:#000a;backdrop-filter:blur(2px)}
+  #paused div{text-align:center;color:var(--ink)}#paused .pz{font:800 30px system-ui;color:var(--gold)}#paused .ps{color:var(--dim);margin-top:6px;font-size:15px}
+  #strip{position:fixed;left:0;right:0;bottom:0;z-index:12;display:none;align-items:center;gap:10px;padding:9px 12px;
+         background:linear-gradient(0deg,#0d1014f2,#0d1014c0);border-top:1px solid var(--line);font:700 14px system-ui}
+  #strip .sp{padding:3px 9px;border-radius:8px;background:#0d1014;border:1px solid var(--line);white-space:nowrap}
+  #strip #s_phase.CONTRACT{color:var(--gold)}#strip #s_phase.RELAX{color:var(--green)}#strip #s_phase.DEEPEN{color:#7db2ff}#strip #s_phase.SETTLE{color:var(--dim)}
+  #strip #s_now{color:var(--ink)}#strip #s_best{color:var(--gold)}
+  #s_earn{margin-left:auto;font-size:13px;font-weight:800}#s_earn.on{color:var(--green)}#s_earn.off{color:var(--red)}
+  #s_twinge{pointer-events:auto;background:#3a1414;border:1px solid var(--red);color:#ff9d94;border-radius:9px;padding:8px 12px;font:800 13px system-ui;cursor:pointer;white-space:nowrap}
+  body.reward #cv{inset:auto;left:10px;bottom:58px;width:112px;height:150px;z-index:8;border-radius:12px;border:1px solid var(--line);object-fit:cover}
+  body.reward #phasecard,body.reward #routine,body.reward #ctl,body.reward .bottom #twinge,body.reward .top{display:none}
+  body.reward #hud{background:transparent}
 </style></head><body>
 <video id="v" playsinline muted></video>
+<div id="yt"></div>
+<div id="paused"><div><div class="pz">⏸ back on the mat</div><div class="ps">the video rolls while you're in the stretch</div></div></div>
 <canvas id="cv"></canvas>
 
 <div id="hud" style="display:none">
@@ -76,11 +93,24 @@
   </div>
 </div>
 
+<div id="strip">
+  <span class="sp" id="s_name">—</span>
+  <span class="sp" id="s_phase">Settle</span>
+  <span class="sp" id="s_time">--</span>
+  <span class="sp"><b id="s_now">--°</b> / <span id="s_best">--°</span></span>
+  <span id="s_earn" class="off">⏸ earn it</span>
+  <button id="s_twinge">⚠ TWINGE</button>
+</div>
+
 <div id="pb"><div>PB! 🎉</div></div>
 
 <div id="splash">
   <h1>CALI <b>STRETCH</b></h1>
   <p>Prop your phone <b>side-on</b>, whole body in frame. It runs your whole session hands-free — PNF timed, angles measured, knee-safe.</p>
+  <label style="display:flex;align-items:center;gap:10px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 16px;margin-bottom:16px;cursor:pointer;max-width:34ch">
+    <input type="checkbox" id="rewardOn" style="width:20px;height:20px;accent-color:var(--gold)">
+    <span style="text-align:left"><b>Earn the watch</b> — a video plays <i>only</i> while you're in the stretch. Stop, it pauses.</span>
+  </label>
   <button class="btn" id="start">Start session</button>
   <button class="btn ghost" id="demo" style="margin-top:10px">Quick demo (20s each)</button>
   <div id="load">loading pose engine…</div>
@@ -93,7 +123,7 @@
   <div id="unlocks"></div>
   <button class="btn" id="again" style="margin-top:24px;align-self:flex-start">Done</button>
 </div>
-<div id="stamp">stretch v1 · 13 Jul</div>
+<div id="stamp">stretch v2 · earn-the-watch · 15 Jul</div>
 
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
@@ -121,6 +151,37 @@ let mirrored = false, facing = "user";
 let voiceOn = true;
 function say(t, force) { try { if (!voiceOn) return; if (force) speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = .98; u.pitch = 1; speechSynthesis.speak(u); } catch {} }
 
+// ---- reward layer (spec §9½): the video plays ONLY while an active stretch is detected ----
+// YouTube can't be iframed as a full browse pane (X-Frame-Options), so we drive the IFrame Player API
+// with a playlist/video = his content, his choice, no Shorts, and exact play/pause tied to the reps.
+const REWARD_GRACE = 4000;               // ms out-of-position before the video pauses (spec: ~3-5s)
+const REWARD_ACTIVE = 30;                // % into the stretch that counts as "in position"
+const QP = new URLSearchParams(location.search);
+let yt = null, ytReady = false, ytPlaying = false;
+function loadYT() {
+  if (window.YT || document.getElementById("ytapi")) return;
+  const list = QP.get("list"), vid = QP.get("v");                   // ?list=<playlist> (preferred) or ?v=<videoId>
+  const pv = { autoplay: 0, controls: 1, rel: 0, modestbranding: 1, playsinline: 1, fs: 1, iv_load_policy: 3 };
+  if (list) { pv.listType = "playlist"; pv.list = list; }
+  window.onYouTubeIframeAPIReady = () => {
+    yt = new YT.Player("yt", {
+      host: "https://www.youtube.com",
+      videoId: list ? undefined : (vid || "jfKfPfyJRdk"),           // default: a long-running lofi stream; pass ?list= for your own
+      playerVars: pv,
+      events: { onReady: () => { ytReady = true; try { yt.pauseVideo(); } catch {} } }
+    });
+  };
+  const s = document.createElement("script"); s.id = "ytapi"; s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s);
+}
+function ytPlay() { if (ytReady && !ytPlaying) { try { yt.playVideo(); } catch {} ytPlaying = true; } }
+function ytPause(nudge) { if (ytReady && ytPlaying) { try { yt.pauseVideo(); } catch {} ytPlaying = false; if (nudge) { say("Back on the stretch to keep it rolling.", false); } } }
+// is the person actually in the stretch right now? (visible + eased into position)
+function stretchActive(lm, key) {
+  if (!lm || !stretchReady(lm, key, S.side)) return false;
+  const a = S.ang.v; if (a == null) return false;
+  return stretchProgress(a, key) >= REWARD_ACTIVE;
+}
+
 async function startCam() {
   const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 } }, audio: false });
   video.srcObject = s; await video.play();
@@ -133,10 +194,12 @@ let S = null;  // running session
 function begin(demo) {
   const st = load(LS.streak, { count: 0, last: null });
   $("streakn").textContent = st.count;
-  S = { i: 0, demo, sessionBest: {}, twinges: [], pnf: null, stMax: null, ang: new EMA(0.3),
-        paused: false, restUntil: 0, lastPhase: "", side: "L", swapped: false };
+  const reward = $("rewardOn") && $("rewardOn").checked;
+  S = { i: 0, demo, reward, sessionBest: {}, twinges: [], pnf: null, stMax: null, ang: new EMA(0.3),
+        paused: false, restUntil: 0, lastPhase: "", side: "L", swapped: false, activeLast: 0, wasActive: null };
   $("splash").remove(); $("hud").style.display = "flex";
-  say("Cali Stretch. Get side on, whole body in frame. Starting.", true);
+  if (reward) { document.body.classList.add("reward"); $("yt").style.display = "block"; $("strip").style.display = "flex"; loadYT(); }
+  say(reward ? "Cali Stretch. Get into the first stretch and the video starts. Come out, it pauses." : "Cali Stretch. Get side on, whole body in frame. Starting.", true);
   renderRoutine(); nextStretch();
 }
 $("start").onclick = async () => { try { await startCam(); begin(false); loop(); } catch (e) { $("load").textContent = "camera blocked: " + e.message; } };
@@ -169,6 +232,7 @@ $("twinge").onclick = () => {
   flashPB("noted ✓");
   S.i++; nextStretch();
 };
+$("s_twinge").onclick = () => $("twinge").onclick();
 
 function flashPB(txt) { const el = $("pb"); el.firstElementChild.textContent = txt; el.style.display = "flex"; setTimeout(() => el.style.display = "none", 1400); }
 
@@ -199,7 +263,7 @@ function loop() {
   if (!S || S.paused) return;
   // rest between stretches
   if (nextStretch2Pending && performance.now() >= S.restUntil) { nextStretch2Pending = false; nextStretch(); }
-  if (nextStretch2Pending) { $("phase").textContent = "Rest"; $("big").textContent = "···"; return; }
+  if (nextStretch2Pending) { $("phase").textContent = "Rest"; $("big").textContent = "···"; if (S.reward) { ytPause(false); $("paused").style.display = "flex"; } return; }
   if (!S.pnf) return;
 
   // measure the defining angle
@@ -238,9 +302,25 @@ function loop() {
   $("cue").textContent = p.cue;
   // cycle dots
   $("cycles").innerHTML = Array.from({ length: p.cyclesTotal }, (_, i) => `<span class="dot ${i < p.cycle ? "on" : ""}"></span>`).join("");
-  // speak on phase change + countdown
+
+  // reward gate: video plays only while in position; glanceable strip carries the coaching (spec §9½)
+  if (S.reward) {
+    const active = stretchActive(lm, key), now = performance.now();
+    if (active) { S.activeLast = now; ytPlay(); }
+    else if (now - S.activeLast > REWARD_GRACE) ytPause(S.wasActive === true);
+    S.wasActive = active;
+    $("paused").style.display = ytPlaying ? "none" : "flex";
+    const se = $("s_earn"); se.className = ytPlaying ? "on" : "off"; se.textContent = ytPlaying ? "▶ earning" : "⏸ earn it";
+    $("s_name").textContent = STRETCHES[key].name + (STRETCHES[key].side ? " · " + S.side : "");
+    const sp = $("s_phase"); sp.textContent = p.label.split(" · ")[0]; sp.className = p.phase;
+    $("s_time").textContent = p.phaseRemain + "s";
+    $("s_now").textContent = live != null ? Math.round(live) + "°" : "--°";
+    $("s_best").textContent = best != null ? Math.round(best) + "°" : "--°";
+  }
+
+  // speak on phase change; skip the numeric countdown in reward mode (don't nag over his video)
   if (p.phase !== S.lastPhase) { S.lastPhase = p.phase; say(p.cue, true); }
-  const cd = S.pnf.countdown(el); if (cd && cd !== S.lastCd) { S.lastCd = cd; say(String(cd)); }
+  const cd = S.pnf.countdown(el); if (!S.reward && cd && cd !== S.lastCd) { S.lastCd = cd; say(String(cd)); }
 }
 
 function onStretchDone(key) {
@@ -252,6 +332,7 @@ function onStretchDone(key) {
 }
 
 function finish() {
+  if (S.reward) { ytPause(false); document.body.classList.remove("reward"); $("yt").style.display = "none"; $("strip").style.display = "none"; $("paused").style.display = "none"; }
   $("hud").style.display = "none"; $("end").style.display = "flex";
   // streak
   const today = new Date().toISOString().slice(0, 10);
