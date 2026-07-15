@@ -1,0 +1,284 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Cali Stretch</title>
+<!-- The AI Mobility Coach. Same pose engine as the handstand coach, pointed at deep stretch.
+     Hands-free PNF timing + live joint angle + best-ever ghost + PB + the TWINGE knee guardrail.
+     Spec: behaviour-lab/private/stretch-app-spec.md · engine: calistretch.js (22/22 tests). -->
+<style>
+  :root{--bg:#0d1014;--ink:#ECE7DB;--dim:#8b8f98;--gold:#F2B208;--green:#4cae6a;--red:#f0564b;--panel:#181b22;--line:#2a2f38}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,system-ui,sans-serif;overflow:hidden}
+  video{display:none}
+  #cv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  #splash{position:fixed;inset:0;z-index:20;background:radial-gradient(120% 90% at 50% 0,#1c2330,#0d1014);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:26px}
+  #splash h1{font-size:34px;font-weight:800;margin:0 0 6px;letter-spacing:-.02em}#splash h1 b{color:var(--gold)}
+  #splash p{color:var(--dim);max-width:34ch;margin:0 0 22px}
+  .btn{background:var(--gold);color:#1A1A1E;border:0;border-radius:14px;padding:14px 30px;font:700 18px system-ui;cursor:pointer}
+  .ghost{background:var(--panel);border:1px solid var(--line);color:var(--ink)}
+  #load{color:var(--dim);font-size:14px;margin-top:14px}
+  /* live HUD */
+  #hud{position:fixed;inset:0;z-index:10;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;padding:14px 16px}
+  .chip{background:#0d1014cc;border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-weight:700;font-size:14px}
+  .chip b{color:var(--gold)}
+  #phasecard{align-self:center;text-align:center;background:#0d1014d0;border:1px solid var(--line);border-radius:18px;padding:16px 26px;min-width:300px;margin-top:2px}
+  #phase{font:800 22px system-ui;letter-spacing:.01em}
+  #phase.CONTRACT{color:var(--gold)}#phase.RELAX{color:var(--green)}#phase.DEEPEN{color:#7db2ff}#phase.SETTLE{color:var(--dim)}
+  #big{font:800 84px ui-monospace,monospace;line-height:1;margin:4px 0}
+  #cue{color:var(--ink);font-size:16px;min-height:22px}
+  #cycles{margin-top:8px;display:flex;gap:6px;justify-content:center}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--line)}.dot.on{background:var(--gold)}
+  .anglebar{display:flex;gap:16px;justify-content:center;margin-top:8px;font:700 15px ui-monospace,monospace}
+  .anglebar .now{color:var(--ink)}.anglebar .best{color:var(--gold)}.anglebar .lbl{color:var(--dim);font-weight:400}
+  .bottom{padding:14px 16px 24px;display:flex;flex-direction:column;gap:10px}
+  #routine{display:flex;gap:5px;justify-content:center;flex-wrap:wrap}
+  .rc{font-size:11px;color:var(--dim);background:#0d1014aa;border:1px solid var(--line);border-radius:8px;padding:4px 8px}
+  .rc.done{color:var(--green);border-color:#2e5a3e}.rc.now{color:var(--gold);border-color:#6b5410}
+  #twinge{pointer-events:auto;background:#3a1414;border:2px solid var(--red);color:#ff9d94;border-radius:16px;padding:15px;font:800 17px system-ui;text-align:center;cursor:pointer}
+  #twinge small{display:block;color:#c98;font-weight:400;font-size:12px;margin-top:2px}
+  #ctl{pointer-events:auto;display:flex;gap:8px;justify-content:center}
+  #ctl button{background:#0d1014cc;border:1px solid var(--line);color:var(--ink);border-radius:11px;padding:9px 16px;font:600 14px system-ui;cursor:pointer}
+  #pb{position:fixed;inset:0;z-index:15;display:none;align-items:center;justify-content:center;pointer-events:none}
+  #pb div{background:#0d1014;border:2px solid var(--gold);border-radius:20px;padding:20px 40px;font:800 40px system-ui;color:var(--gold);transform:scale(.6);animation:pop .5s forwards}
+  @keyframes pop{to{transform:scale(1)}}
+  /* end screen */
+  #end{position:fixed;inset:0;z-index:25;background:var(--bg);display:none;flex-direction:column;padding:34px 22px;overflow:auto}
+  #end h2{font-size:26px;margin:0 0 4px}#end .streak{color:var(--gold);font:800 22px system-ui;margin-bottom:16px}
+  .jrow{display:flex;align-items:center;gap:10px;margin:9px 0}
+  .jrow .nm{width:120px;font-size:13px;color:var(--dim)}
+  .track{flex:1;height:16px;background:var(--panel);border-radius:8px;position:relative;overflow:hidden}
+  .fill{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,#6b5410,var(--gold));border-radius:8px}
+  .d1{position:absolute;top:-3px;bottom:-3px;width:2px;background:#fff6}
+  .jrow .val{width:96px;text-align:right;font:700 13px ui-monospace,monospace}
+  .jrow .val small{color:var(--dim);font-weight:400}
+  #unlocks{margin-top:16px;color:var(--green);font-weight:700}
+  #stamp{position:fixed;right:8px;bottom:6px;z-index:30;font:600 10px ui-monospace,monospace;color:var(--ink);opacity:.35}
+</style></head><body>
+<video id="v" playsinline muted></video>
+<canvas id="cv"></canvas>
+
+<div id="hud" style="display:none">
+  <div class="top">
+    <div class="chip" id="stname">—</div>
+    <div class="chip">🔥 <b id="streakn">0</b>/30</div>
+  </div>
+  <div id="phasecard">
+    <div id="phase" class="SETTLE">Settle</div>
+    <div id="big">--</div>
+    <div id="cue">get side-on, whole body in frame</div>
+    <div id="cycles"></div>
+    <div class="anglebar"><span class="now" id="angNow">--°</span><span class="lbl">now</span><span class="best" id="angBest">--°</span><span class="lbl">best</span></div>
+  </div>
+  <div class="bottom">
+    <div id="routine"></div>
+    <div id="ctl"><button id="pause">⏸ Pause</button><button id="skip">Skip ›</button></div>
+    <div id="twinge">⚠ TWINGE — tap to cap this stretch<small>to the twinge, not through it · logged, no shame</small></div>
+  </div>
+</div>
+
+<div id="pb"><div>PB! 🎉</div></div>
+
+<div id="splash">
+  <h1>CALI <b>STRETCH</b></h1>
+  <p>Prop your phone <b>side-on</b>, whole body in frame. It runs your whole session hands-free — PNF timed, angles measured, knee-safe.</p>
+  <button class="btn" id="start">Start session</button>
+  <button class="btn ghost" id="demo" style="margin-top:10px">Quick demo (20s each)</button>
+  <div id="load">loading pose engine…</div>
+</div>
+
+<div id="end">
+  <h2>Session done 🖤</h2>
+  <div class="streak" id="endstreak"></div>
+  <div id="jbars"></div>
+  <div id="unlocks"></div>
+  <button class="btn" id="again" style="margin-top:24px;align-self:flex-start">Done</button>
+</div>
+<div id="stamp">stretch v1 · 13 Jul</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+import { angleAt, pickSide, chain, EMA } from "./scorer.js";
+import { STRETCHES, ROUTINE, PNFEngine, stretchAngle, stretchReady, stretchProgress, isBetter, guardrail, applyTwinge, skillUnlocks } from "./calistretch.js";
+
+const $ = id => document.getElementById(id);
+const LS = { bests:"caliStretchBests", day1:"caliStretchDay1", streak:"caliStretchStreak", twinge:"caliStretchTwinge", log:"caliStretchLog" };
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+let bests = load(LS.bests, {}), day1 = load(LS.day1, {}), twinge = load(LS.twinge, {});
+const CONNS = [[11,13],[13,15],[12,14],[14,16],[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+
+let landmarker = null, video = $("v"), canvas = $("cv"), ctx = canvas.getContext("2d");
+let mirrored = false, facing = "user";
+(async () => {
+  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate: "GPU" },
+    runningMode: "VIDEO", numPoses: 1 });
+  $("load").textContent = "ready — prop side-on and start";
+})().catch(e => { $("load").textContent = "engine failed: " + e.message; });
+
+// voice
+let voiceOn = true;
+function say(t, force) { try { if (!voiceOn) return; if (force) speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = .98; u.pitch = 1; speechSynthesis.speak(u); } catch {} }
+
+async function startCam() {
+  const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 } }, audio: false });
+  video.srcObject = s; await video.play();
+  canvas.width = video.videoWidth || 720; canvas.height = video.videoHeight || 1280;
+  mirrored = (s.getVideoTracks()[0].getSettings().facingMode ?? facing) !== "environment";
+}
+
+// ---- session state ----
+let S = null;  // running session
+function begin(demo) {
+  const st = load(LS.streak, { count: 0, last: null });
+  $("streakn").textContent = st.count;
+  S = { i: 0, demo, sessionBest: {}, twinges: [], pnf: null, stMax: null, ang: new EMA(0.3),
+        paused: false, restUntil: 0, lastPhase: "", side: "L", swapped: false };
+  $("splash").remove(); $("hud").style.display = "flex";
+  say("Cali Stretch. Get side on, whole body in frame. Starting.", true);
+  renderRoutine(); nextStretch();
+}
+$("start").onclick = async () => { try { await startCam(); begin(false); loop(); } catch (e) { $("load").textContent = "camera blocked: " + e.message; } };
+$("demo").onclick  = async () => { try { await startCam(); begin(true); loop(); } catch (e) { $("load").textContent = "camera blocked: " + e.message; } };
+
+function curKey() { return ROUTINE[S.i]; }
+function nextStretch() {
+  if (S.i >= ROUTINE.length) return finish();
+  const key = curKey(), st = STRETCHES[key];
+  const secs = S.demo ? 20 : st.secs;
+  S.pnf = new PNFEngine(secs, {});
+  S.t0 = performance.now(); S.stMax = null; S.lastPhase = ""; S.swapped = false; S.side = pickSideNow(key);
+  $("stname").textContent = st.name + (st.side ? " · L" : "");
+  renderRoutine();
+  say(`${st.name}. ${st.side ? "Left side first. " : ""}Ease into your end range.`, true);
+}
+function pickSideNow(key) { return "L"; }
+function advance() { S.i++; S.restUntil = performance.now() + (S.demo ? 1500 : 4000); nextStretch2Pending = true; }
+let nextStretch2Pending = false;
+
+$("skip").onclick = () => { if (S) { S.i++; nextStretch(); } };
+$("pause").onclick = () => { if (!S) return; S.paused = !S.paused; $("pause").textContent = S.paused ? "▶ Resume" : "⏸ Pause"; if (S.paused) say("paused"); else { S.t0 = performance.now() - S.pausedAt; } if (S.paused) S.pausedAt = performance.now() - S.t0; };
+$("twinge").onclick = () => {
+  if (!S) return; const key = curKey();
+  const live = S.ang.v ?? STRETCHES[key].target;
+  const newCeil = applyTwinge(live, key);
+  if (newCeil != null) { twinge[key] = newCeil; save(LS.twinge, twinge); }
+  S.twinges.push({ key, angle: Math.round(live) });
+  say("Logged. Capping this one. No worries, to the twinge not through it.", true);
+  flashPB("noted ✓");
+  S.i++; nextStretch();
+};
+
+function flashPB(txt) { const el = $("pb"); el.firstElementChild.textContent = txt; el.style.display = "flex"; setTimeout(() => el.style.display = "none", 1400); }
+
+function renderRoutine() {
+  $("routine").innerHTML = ROUTINE.map((k, i) =>
+    `<span class="rc ${i < S.i ? "done" : i === S.i ? "now" : ""}">${STRETCHES[k].name.split(" ")[0]}</span>`).join("");
+}
+
+// ---- the loop ----
+function loop() {
+  requestAnimationFrame(loop);
+  if (!landmarker || video.readyState < 2) return;
+  ctx.save(); if (mirrored) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const res = landmarker.detectForVideo(video, performance.now());
+  const lm = res.landmarks?.[0] || null;
+  const key = curKey();
+  // skeleton + live angle
+  if (lm) {
+    const W = canvas.width, H = canvas.height;
+    ctx.lineWidth = 4; ctx.strokeStyle = "#F2B208cc";
+    for (const [a, b] of CONNS) { ctx.beginPath(); ctx.moveTo(lm[a].x*W, lm[a].y*H); ctx.lineTo(lm[b].x*W, lm[b].y*H); ctx.stroke(); }
+    ctx.fillStyle = "#fff";
+    for (const p of lm) { ctx.beginPath(); ctx.arc(p.x*W, p.y*H, 4, 0, 7); ctx.fill(); }
+  }
+  ctx.restore();
+
+  if (!S || S.paused) return;
+  // rest between stretches
+  if (nextStretch2Pending && performance.now() >= S.restUntil) { nextStretch2Pending = false; nextStretch(); }
+  if (nextStretch2Pending) { $("phase").textContent = "Rest"; $("big").textContent = "···"; return; }
+  if (!S.pnf) return;
+
+  // measure the defining angle
+  let live = null;
+  if (lm && stretchReady(lm, key, S.side)) { live = S.ang.feed(stretchAngle(lm, key, S.side)); }
+  const best = bests[key];
+  $("angNow").textContent = live != null ? Math.round(live) + "°" : "--°";
+  $("angBest").textContent = best != null ? Math.round(best) + "°" : "--°";
+
+  // PB + session max (respect direction)
+  if (live != null) {
+    if (S.stMax == null || isBetter(live, S.stMax, key)) S.stMax = live;
+    if (isBetter(live, best, key) && (best != null)) {   // only celebrate vs a real prior best
+      // guard against jitter: require a clear margin
+      if (Math.abs(live - best) > 1.5) { bests[key] = Math.round(live); save(LS.bests, bests); flashPB("PB! " + Math.round(live) + "°"); say("New best. Nice.", false); }
+    } else if (best == null && S.stMax != null) { bests[key] = Math.round(S.stMax); }
+    if (day1[key] == null) { day1[key] = Math.round(live); save(LS.day1, day1); }
+  }
+
+  // safety guardrail
+  if (live != null) {
+    const g = guardrail(live, key, twinge[key]);
+    if (g.capped) { $("phase").style.background = "#3a1414"; say("That's your safe limit. Ease back.", false); }
+    else $("phase").style.background = "transparent";
+    if (g.warn) $("angNow").style.color = "#f0564b"; else $("angNow").style.color = "";
+  }
+
+  // PNF timing
+  const el = (performance.now() - S.t0) / 1000;
+  const p = S.pnf.at(el);
+  if (p.done) { onStretchDone(key); return; }
+  // per-side swap at halfway
+  if (STRETCHES[key].side && !S.swapped && el > S.pnf.total / 2) { S.swapped = true; S.side = "R"; S.ang.v = null; $("stname").textContent = STRETCHES[key].name + " · R"; say("Swap. Right side now.", true); }
+  $("phase").textContent = p.label; $("phase").className = p.phase;
+  $("big").textContent = p.phase === "CONTRACT" || p.phase === "DEEPEN" || p.phase === "SETTLE" || p.phase === "RELAX" ? p.phaseRemain + "s" : "";
+  $("cue").textContent = p.cue;
+  // cycle dots
+  $("cycles").innerHTML = Array.from({ length: p.cyclesTotal }, (_, i) => `<span class="dot ${i < p.cycle ? "on" : ""}"></span>`).join("");
+  // speak on phase change + countdown
+  if (p.phase !== S.lastPhase) { S.lastPhase = p.phase; say(p.cue, true); }
+  const cd = S.pnf.countdown(el); if (cd && cd !== S.lastCd) { S.lastCd = cd; say(String(cd)); }
+}
+
+function onStretchDone(key) {
+  // lock in the session best for this stretch
+  if (S.stMax != null && isBetter(S.stMax, bests[key], key)) { bests[key] = Math.round(S.stMax); save(LS.bests, bests); }
+  S.sessionBest[key] = S.stMax != null ? Math.round(S.stMax) : (bests[key] ?? null);
+  say("Good. Relax.", true);
+  advance();
+}
+
+function finish() {
+  $("hud").style.display = "none"; $("end").style.display = "flex";
+  // streak
+  const today = new Date().toISOString().slice(0, 10);
+  const st = load(LS.streak, { count: 0, last: null });
+  if (st.last !== today) {
+    const yday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+    st.count = (st.last === yday) ? st.count + 1 : 1; st.last = today; save(LS.streak, st);
+  }
+  $("endstreak").textContent = `🔥 ${st.count}/30 nights`;
+  // per-joint bars vs day-1
+  $("jbars").innerHTML = ROUTINE.map(k => {
+    const b = bests[k], d = day1[k], st = STRETCHES[k];
+    if (b == null) return "";
+    const pct = stretchProgress(b, k);
+    const gain = (d != null) ? (st.dir > 0 ? Math.round(b - d) : Math.round(d - b)) : 0;
+    return `<div class="jrow"><div class="nm">${st.name}</div>
+      <div class="track"><div class="fill" style="width:${pct}%"></div>${d != null ? `<div class="d1" style="left:${stretchProgress(d, k)}%"></div>` : ""}</div>
+      <div class="val">${Math.round(b)}° <small>${gain >= 0 ? "+" : ""}${gain}° vs d1</small></div></div>`;
+  }).join("");
+  // skill unlocks
+  const u = skillUnlocks(bests);
+  $("unlocks").textContent = u.length ? `🔓 Range unlocked for: ${u.join(", ")}!` : "Keep going — skill unlocks show here.";
+  // log
+  const log = load(LS.log, []); log.push({ date: today, bests: { ...S.sessionBest }, twinges: S.twinges }); save(LS.log, log.slice(-60));
+  say(u.length ? `Session done. You've unlocked the range for ${u.join(" and ")}. ${st.count} nights.` : `Session done. ${st.count} nights. Great work.`, true);
+}
+$("again").onclick = () => location.reload();
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+</script></body></html>
